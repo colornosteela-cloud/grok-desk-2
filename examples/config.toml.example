@@ -1,0 +1,54 @@
+# Copy to ~/.grok/config.toml after grok login. No API keys belong here —
+# Grok cloud uses `grok login`; local Qwen talks to deskd /v1/llm.
+
+[cli]
+installer = "internal"
+
+[ui]
+permission_mode = "always-approve"
+
+[models]
+default = "qwen38-hybrid"
+
+[model.qwen38-hybrid]
+model = "qwen38-hybrid"
+base_url = "http://127.0.0.1:8000/v1"
+name = "Qwen3-VL-8B / 27B Local"
+api_backend = "chat_completions"
+context_window = 262144
+reasoning_effort = "low"
+
+[model.qwen38-27b]
+model = "qwen38"
+base_url = "http://127.0.0.1:8000/v1"
+name = "Qwen 3.8 27B only"
+api_backend = "chat_completions"
+context_window = 262144
+reasoning_effort = "low"
+
+[model.qwen3-vl-8b]
+model = "qwen3-vl-8b"
+base_url = "http://127.0.0.1:8000/v1"
+name = "Qwen3-VL-8B Local"
+api_backend = "chat_completions"
+context_window = 262144
+reasoning_effort = "low"
+
+[model.muse-glimmer]
+model = "muse-glimmer"
+base_url = "http://127.0.0.1:8000/v1"
+name = "Muse Glimmer 30B Local"
+api_backend = "chat_completions"
+context_window = 131072
+
+[model."grok-4.6"]
+model = "grok-4.6"
+name = "Grok 4.6"
+api_backend = "responses"
+context_window = 500000
+
+[model."grok-4.5"]
+model = "grok-4.5"
+name = "Grok 4.5"
+api_backend = "responses"
+context_window = 500000

@@ -1,0 +1,4370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TEELA — Responsive Front-Center Character View</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#090d12; --panel:#111820; --panel2:#0d141c; --line:#29323d;
+  --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ok:#3fb950; --warn:#d29922;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden}
+body{padding:10px}
+.app{
+  display:grid;
+  grid-template-columns:minmax(340px,390px) 1fr;
+  gap:10px;
+  height:calc(100vh - 20px);
+  max-width:1600px;
+  margin:auto;
+}
+.sidebar{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:14px;
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  overflow:hidden;
+}
+.sidehead{
+  padding:12px 12px 10px;
+  border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#131b25 0%, #10161f 100%);
+}
+.sidehead h1{font-size:18px;margin:0 0 3px}
+.sidehead .sub{font-size:12px;color:var(--muted);line-height:1.35}
+.sidebar-body{
+  display:grid;
+  grid-template-rows:auto auto 1fr;
+  gap:8px;
+  padding:10px;
+  min-height:0;
+}
+.panel{
+  background:var(--panel2);
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:10px;
+  min-width:0;
+}
+.panel h2{
+  margin:0 0 6px;
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.07em;
+  color:var(--muted);
+}
+.desc{font-size:11px;color:var(--muted);line-height:1.4}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+button{
+  min-height:34px;padding:6px 10px;border-radius:8px;border:1px solid #3b4653;
+  background:#202832;color:var(--text);font-size:12px;cursor:pointer
+}
+button:hover:not(:disabled){background:#293441}
+button.primary{background:#1f6feb;border-color:#388bfd}
+button.primary:hover:not(:disabled){background:#2f81f7}
+button.success{background:#238636;border-color:#2ea043}
+button.success:hover:not(:disabled){background:#2ea043}
+button:disabled{opacity:.38;cursor:not-allowed}
+button.small{min-height:30px;padding:5px 8px;font-size:11px}
+button.on,button.motionCtl.on{background:#1f6feb;border-color:#388bfd;color:#fff}
+.statepill{
+  padding:5px 8px;border:1px solid rgba(88,166,255,.45);border-radius:999px;
+  font-size:11px;background:rgba(88,166,255,.12);color:#a5d6ff;display:inline-flex
+}
+.statepill.locked{background:rgba(88,166,255,.18);border-color:rgba(88,166,255,.65);color:#c8e4ff}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+
+.tabs{display:flex;gap:6px}
+.tab-btn{
+  flex:1;min-width:0;text-align:center;
+  background:#18212c;border:1px solid var(--line)
+}
+.tab-btn.active{background:#1f6feb;border-color:#388bfd}
+.tab-pane{display:none;min-height:0}
+.tab-pane.active{display:block}
+.scrollpane{
+  min-height:0;overflow:auto;padding-right:2px;
+  scrollbar-width:thin;
+}
+.group{
+  border:1px solid var(--line);border-radius:10px;background:#0f1620;
+  padding:8px;margin-bottom:8px
+}
+.group h3{margin:0 0 6px;font-size:11px;color:#c9d1d9;text-transform:uppercase;letter-spacing:.06em}
+.slider-row{
+  display:grid;grid-template-columns:80px 1fr 40px;gap:6px;align-items:center;
+  margin:5px 0
+}
+.slider-row label{font-size:11px;color:var(--muted)}
+.slider-row output{
+  text-align:right;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#c9d1d9
+}
+.part-row{
+  display:grid;grid-template-columns:1fr auto auto auto;gap:6px;align-items:center;
+  margin:4px 0
+}
+.part-row .part-name{font-size:11px;color:var(--muted)}
+.part-row output{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;min-width:36px;text-align:right;color:#c9d1d9}
+input[type=range]{width:100%;min-width:0;accent-color:var(--accent)}
+input[type=range]:disabled{opacity:.42}
+.stats{display:grid;grid-template-columns:1fr auto;gap:6px 10px;font-size:11px}
+.k{color:var(--muted)} .v{text-align:right;font-variant-numeric:tabular-nums}
+.hint{font-size:11px;color:var(--muted);line-height:1.5}
+.mic-eq{display:block;min-width:0}
+.mic-analysis{margin-top:8px;min-width:0}
+.mic-analyzer{
+  display:flex;align-items:flex-end;gap:clamp(1px,.3vw,2px);
+  height:clamp(44px,11vw,68px);margin-top:6px;
+  padding:clamp(6px,.6vw,8px);border:1px solid var(--line);border-radius:8px;
+  background:#0b1118;min-width:0;overflow:hidden
+}
+.mic-analyzer span{
+  flex:1 1 0;min-width:2px;height:4%;border-radius:2px 2px 0 0;
+  background:linear-gradient(180deg,#58a6ff,#1f6feb);opacity:.45
+}
+.mic-analyzer span.speech{
+  background:linear-gradient(180deg,#7ee787,#3fb950);opacity:1
+}
+.mic-analyzer.tts span,.mic-analyzer.tts span.speech{
+  background:linear-gradient(180deg,#e3b341,#d29922);opacity:.9
+}
+.mic-vu{position:relative;height:7px;margin-top:6px;border-radius:99px;background:#18212c;overflow:hidden}
+.mic-vu i{display:block;height:100%;width:0;background:#3fb950;border-radius:99px}
+.mic-vu em{position:absolute;top:0;bottom:0;width:2px;left:0;background:#8b949e;opacity:.75}
+.mic-vu.hot i{background:#d29922}
+.mic-vu.speech i{background:#3fb950}
+.mic-stats{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-top:6px;
+  font:clamp(9px,.8vw,10px) ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)
+}
+.mic-stats span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mic-stats b{color:#c9d1d9;font-weight:600}
+kbd{border:1px solid #3b4653;border-bottom-width:2px;border-radius:4px;background:#202832;padding:1px 5px;color:var(--text);font-size:11px}
+.msg{margin-top:7px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#101723;font-size:11px;color:var(--muted);line-height:1.4}
+
+.stage{
+  position:relative;
+  border:1px solid var(--line);
+  border-radius:14px;
+  overflow:hidden;
+  background:#0b1118;
+  min-height:0;
+}
+#gl{display:block;width:100%;height:100%;touch-action:none}
+.hud{
+  position:absolute;left:12px;top:12px;padding:8px 10px;border:1px solid var(--line);
+  border-radius:8px;background:rgba(8,12,17,.82);
+  font:12px ui-monospace,SFMono-Regular,Menlo,monospace;
+  color:#c9d1d9;pointer-events:none;white-space:pre
+}
+.compass{
+  position:absolute;right:12px;top:12px;left:auto;width:48px;height:48px;z-index:3;
+  border:1px solid var(--line);border-radius:50%;
+  background:rgba(8,12,17,.82);pointer-events:none;
+  color:#9aa4b2;font:700 8px ui-monospace,SFMono-Regular,Menlo,monospace
+}
+.compass [data-heading]{position:absolute;transform:translate(-50%,-50%)}
+.compass-n{left:50%;top:8px}
+.compass-s{left:50%;top:calc(100% - 8px)}
+.compass-e{left:calc(100% - 8px);top:50%}
+.compass-w{left:8px;top:50%}
+.compass .on{color:#7ee787}
+.compass-needle{
+  position:absolute;left:50%;top:50%;width:2px;height:16px;background:#58a6ff;
+  transform-origin:50% 100%;border-radius:1px;margin-left:-1px;margin-top:-16px
+}
+.loading{
+  position:absolute;inset:0;z-index:5;display:grid;place-items:center;background:#0b1118;
+  color:#c9d1d9;text-align:center;padding:30px
+}
+.loading strong{display:block;margin-bottom:6px}
+.loading span{font-size:12px;color:var(--muted)}
+#error{
+  display:none;position:absolute;inset:0;z-index:8;place-items:center;
+  background:#0b1118;color:#ffb4a9;text-align:center;padding:32px
+}
+
+.footer-note{
+  font-size:11px;color:var(--muted);padding:0 10px 10px;line-height:1.45
+}
+
+@media (max-width: 1100px){
+  body{overflow:auto;height:auto}
+  html,body{height:auto}
+  .app{grid-template-columns:1fr; height:auto; min-height:calc(100vh - 20px)}
+  .stage{height:60vh}
+  .sidebar{overflow:visible}
+  .sidebar-body{display:block}
+  .scrollpane{overflow:visible;max-height:none}
+}
+
+/* ==========================================================
+   TEELA FLUID RESPONSIVE LAYOUT
+   Continuously adapts from full desktop -> snapped window ->
+   narrow desktop/tablet -> phone portrait -> phone landscape.
+   ========================================================== */
+
+:root{
+  --page-pad:clamp(4px,.65vw,10px);
+  --app-gap:clamp(4px,.65vw,10px);
+}
+
+/* Keep the application inside the actual visible viewport. */
+html,body{
+  width:100%;
+  height:100%;
+  min-width:0;
+  min-height:0;
+  overflow:hidden;
+}
+body{
+  padding:var(--page-pad);
+  overscroll-behavior:none;
+}
+
+/* Fluid desktop baseline. */
+.app{
+  width:100%;
+  max-width:1800px;
+  height:calc(100dvh - (2 * var(--page-pad)));
+  min-width:0;
+  min-height:0;
+  margin:0 auto;
+  gap:var(--app-gap);
+  grid-template-columns:clamp(290px,26vw,390px) minmax(0,1fr);
+}
+
+.sidebar,
+.stage{
+  min-width:0;
+  min-height:0;
+}
+
+.sidebar{
+  overflow:hidden;
+}
+
+.sidebar-body{
+  min-height:0;
+  overflow:hidden;
+  padding:clamp(6px,.7vw,10px);
+  gap:clamp(5px,.6vw,8px);
+}
+
+.scrollpane{
+  min-height:0;
+  overflow:auto;
+  max-height:none;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+}
+
+/* Let button grids reflow based on the real sidebar width, not only viewport width. */
+.grid2{
+  grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+}
+.grid3{
+  grid-template-columns:repeat(auto-fit,minmax(92px,1fr));
+}
+
+.sidehead{
+  padding:clamp(8px,.8vw,12px);
+}
+.sidehead h1{
+  font-size:clamp(14px,1.25vw,18px);
+  line-height:1.15;
+}
+.sidehead .sub{
+  font-size:clamp(10px,.85vw,12px);
+}
+
+.panel{
+  padding:clamp(7px,.7vw,10px);
+}
+
+button{
+  font-size:clamp(10px,.8vw,12px);
+  padding-left:clamp(6px,.65vw,10px);
+  padding-right:clamp(6px,.65vw,10px);
+  touch-action:manipulation;
+}
+
+.slider-row{
+  grid-template-columns:minmax(68px,80px) minmax(70px,1fr) 40px;
+  gap:clamp(3px,.45vw,6px);
+}
+
+#gl{
+  position:absolute;inset:0;
+  width:100%;
+  height:100%;
+}
+
+/* ----------------------------------------------------------
+   Half snapped / narrowed desktop.
+   Stay side-by-side and continuously shrink rather than
+   suddenly stacking at the old 1100px breakpoint.
+   ---------------------------------------------------------- */
+@media (max-width:1100px) and (min-width:641px){
+  html,body{
+    height:100%;
+    overflow:hidden;
+  }
+  body{
+    height:100%;
+    overflow:hidden;
+  }
+  .app{
+    grid-template-columns:clamp(250px,35vw,330px) minmax(0,1fr);
+    height:calc(100dvh - (2 * var(--page-pad)));
+    min-height:0;
+  }
+  .stage{
+    height:auto;
+    min-height:0;
+  }
+  .sidebar{
+    overflow:hidden;
+  }
+  .sidebar-body{
+    display:grid;
+    grid-template-rows:auto auto minmax(0,1fr);
+  }
+  .scrollpane{
+    overflow:auto;
+    max-height:none;
+  }
+  .sidehead h1{
+    font-size:clamp(12px,1.7vw,15px);
+  }
+  .sidehead .sub{
+    font-size:10px;
+    display:-webkit-box;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:2;
+    overflow:hidden;
+  }
+  .footer-note{
+    display:none;
+  }
+  .panel h2,
+  .group h3{
+    font-size:10px;
+  }
+  .hint,
+  .desc,
+  .msg{
+    font-size:10px;
+  }
+  .grid3{
+    grid-template-columns:repeat(auto-fit,minmax(88px,1fr));
+  }
+  button{
+    min-height:31px;
+    font-size:10px;
+    padding:4px 6px;
+  }
+  button.small{
+    min-height:29px;
+    font-size:9px;
+    padding:4px 5px;
+  }
+  .slider-row{
+    grid-template-columns:66px minmax(56px,1fr) 36px;
+    margin:3px 0;
+  }
+  .slider-row label,
+  .slider-row output{
+    font-size:10px;
+  }
+  .mic-analyzer{height:56px}
+  .mic-stats{font-size:9px}
+  .compass{
+    right:8px;
+    top:8px;
+    left:auto;
+    width:40px;
+    height:40px;
+    font-size:7px;
+  }
+  .compass-n,.compass-s{top:7px}
+  .compass-s{top:calc(100% - 7px)}
+  .compass-e{left:calc(100% - 7px)}
+  .compass-w{left:7px}
+  .compass-needle{height:12px;margin-top:-12px}
+  .hud{
+    left:8px;
+    top:8px;
+    font-size:10px;
+    padding:6px 7px;
+  }
+}
+
+/* Additional compression as a snapped desktop window gets very narrow,
+   while still preserving the side-by-side view. */
+@media (max-width:800px) and (min-width:641px){
+  .app{
+    grid-template-columns:250px minmax(0,1fr);
+  }
+  .sidehead .sub{
+    display:none;
+  }
+  .sidehead{
+    padding:7px;
+  }
+  .sidebar-body{
+    padding:5px;
+    gap:4px;
+  }
+  .panel{
+    padding:6px;
+  }
+  .msg{
+    display:none;
+  }
+  .grid2,
+  .grid3{
+    grid-template-columns:1fr 1fr;
+  }
+  .hud{
+    font-size:9px;
+    max-width:calc(100% - 56px);
+  }
+}
+
+/* ----------------------------------------------------------
+   Phones / very narrow browser windows.
+   Keep the 3D model permanently visible above the controls.
+   Only the lower control area scrolls.
+   ---------------------------------------------------------- */
+@media (max-width:640px){
+  html,body{
+    height:100%;
+    overflow:hidden;
+  }
+  body{
+    height:100%;
+    padding:max(4px,env(safe-area-inset-top))
+            max(4px,env(safe-area-inset-right))
+            max(4px,env(safe-area-inset-bottom))
+            max(4px,env(safe-area-inset-left));
+  }
+  .app{
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:minmax(210px,42dvh) minmax(0,1fr);
+    gap:4px;
+    height:calc(100dvh - max(8px,env(safe-area-inset-top)) - max(8px,env(safe-area-inset-bottom)));
+    min-height:0;
+  }
+  .stage{
+    grid-row:1;
+    height:auto;
+    min-height:210px;
+    border-radius:10px;
+  }
+  .sidebar{
+    grid-row:2;
+    min-height:0;
+    overflow:hidden;
+    border-radius:10px;
+  }
+  .sidehead{
+    flex:0 0 auto;
+    padding:6px 8px;
+  }
+  .sidehead h1{
+    margin:0;
+    font-size:12px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .sidehead .sub{
+    display:none;
+  }
+  .sidebar-body{
+    display:grid;
+    grid-template-rows:auto auto minmax(0,1fr);
+    padding:5px;
+    gap:4px;
+    min-height:0;
+    overflow:hidden;
+  }
+  .scrollpane{
+    min-height:0;
+    overflow:auto;
+    max-height:none;
+  }
+  .panel{
+    padding:6px;
+    border-radius:8px;
+  }
+  .panel h2{
+    margin-bottom:4px;
+    font-size:9px;
+  }
+  .msg{
+    display:none;
+  }
+  .statepill{
+    font-size:9px;
+    padding:4px 6px;
+  }
+  .tabs{
+    gap:4px;
+  }
+  .tab-btn{
+    min-height:32px;
+    font-size:10px;
+  }
+  .group{
+    padding:6px;
+    margin-bottom:5px;
+    border-radius:8px;
+  }
+  .group h3{
+    margin-bottom:4px;
+    font-size:9px;
+  }
+  .grid2,
+  .grid3{
+    grid-template-columns:1fr 1fr;
+    gap:4px;
+  }
+  .slider-row{
+    grid-template-columns:70px minmax(68px,1fr) 36px;
+    gap:4px;
+    margin:3px 0;
+  }
+  .slider-row label,
+  .slider-row output,
+  .hint{
+    font-size:9px;
+  }
+  input[type=range]{
+    min-height:26px;
+  }
+  .mic-analyzer{height:48px;padding:6px}
+  .mic-stats{grid-template-columns:1fr 1fr;gap:3px 8px;font-size:9px}
+  button{
+    min-height:34px;
+    padding:5px 6px;
+    font-size:10px;
+  }
+  button.small{
+    min-height:32px;
+    padding:4px;
+    font-size:9px;
+  }
+  .footer-note{
+    display:none;
+  }
+  .compass{
+    right:6px;
+    top:6px;
+    width:36px;
+    height:36px;
+    font-size:7px;
+  }
+  .compass-needle{height:10px;margin-top:-10px}
+  .hud{
+    left:6px;
+    top:6px;
+    max-width:calc(100% - 50px);
+    padding:5px 6px;
+    font-size:8px;
+    line-height:1.25;
+    overflow:hidden;
+  }
+}
+
+/* Small phones. */
+@media (max-width:430px){
+  .app{
+    grid-template-rows:minmax(195px,39dvh) minmax(0,1fr);
+  }
+  .stage{
+    min-height:195px;
+  }
+  .sidebar-body{
+    padding:4px;
+  }
+  .panel{
+    padding:5px;
+  }
+  .row{
+    gap:4px;
+  }
+  .slider-row{
+    grid-template-columns:64px minmax(58px,1fr) 34px;
+  }
+  .slider-row label,
+  .slider-row output{
+    font-size:8px;
+  }
+  .mic-analyzer{height:42px}
+}
+
+/* Very narrow phones: one button per row where labels need room. */
+@media (max-width:350px){
+  .grid2,
+  .grid3{
+    grid-template-columns:1fr;
+  }
+  .hud{
+    max-width:calc(100% - 48px);
+  }
+}
+
+/* Phone landscape: return to a compact two-column layout so the
+   skeleton does not become a shallow horizontal strip. */
+@media (max-height:520px) and (orientation:landscape) and (max-width:950px){
+  body{
+    padding:4px;
+  }
+  .app{
+    grid-template-columns:clamp(230px,38vw,290px) minmax(0,1fr);
+    grid-template-rows:minmax(0,1fr);
+    height:calc(100dvh - 8px);
+    gap:4px;
+  }
+  .sidebar{
+    grid-column:1;
+    grid-row:1;
+  }
+  .stage{
+    grid-column:2;
+    grid-row:1;
+    height:auto;
+    min-height:0;
+  }
+  .sidehead{
+    padding:5px 7px;
+  }
+  .sidehead h1{
+    font-size:11px;
+  }
+  .sidehead .sub,
+  .msg,
+  .footer-note{
+    display:none;
+  }
+  .sidebar-body{
+    padding:4px;
+    gap:3px;
+  }
+  .panel{
+    padding:5px;
+  }
+  .group{
+    padding:5px;
+    margin-bottom:4px;
+  }
+  .grid2,
+  .grid3{
+    grid-template-columns:1fr 1fr;
+  }
+  .slider-row{
+    grid-template-columns:60px minmax(52px,1fr) 31px;
+    gap:3px;
+    margin:2px 0;
+  }
+  .slider-row label,
+  .slider-row output,
+  .hint{
+    font-size:8px;
+  }
+  .mic-analyzer{height:36px;padding:4px}
+  .mic-stats{grid-template-columns:1fr 1fr;font-size:8px}
+  button{
+    min-height:28px;
+    padding:3px 4px;
+    font-size:9px;
+  }
+  button.small{
+    min-height:27px;
+    padding:3px;
+    font-size:8px;
+  }
+  .hud{
+    font-size:8px;
+  }
+}
+
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidehead">
+      <h1>TEELA — Calibrate, Lock & Natural Walk</h1>
+      <div class="sub">Responsive interface: the controls and 3D view continuously adapt as the browser is resized, snapped, or opened on a phone. This version adds front, side, and back camera presets with smooth animated transitions, along with lower-back adjustment, T-pose, your approved right-arm wave, single-leg-out control, and a ground-support pose.</div>
+    </div>
+
+    <div class="sidebar-body">
+      <section class="panel">
+        <h2>Workflow</h2>
+        <div class="row" style="justify-content:space-between;margin-bottom:6px">
+          <span id="poseState" class="statepill">CALIBRATION / UNLOCKED</span>
+          <span class="hint">1) Adjust pose  2) Lock  3) Move</span>
+        </div>
+        <div class="row">
+          <button id="resetPose" type="button">Reset Setup</button>
+          <button id="frontView" type="button">Front View</button>
+          <button id="sideView" type="button">Side View</button>
+          <button id="backView" type="button">Back View</button>
+          <button id="lockPose" type="button" class="success">Lock Pose</button>
+          <button id="unlockPose" type="button" disabled>Unlock</button>
+        </div>
+        <div class="msg" id="lockMsg">Walking and action controls are disabled until you press <strong>Lock Pose</strong>.</div>
+      </section>
+
+      <section class="panel">
+        <div class="tabs">
+          <button id="tabSetupBtn" class="tab-btn active" type="button">Setup</button>
+          <button id="tabActionBtn" class="tab-btn" type="button">Actions</button>
+          <button id="tabWalkBtn" class="tab-btn" type="button">Walk</button>
+        </div>
+      </section>
+
+      <div class="scrollpane">
+        <div id="tabSetup" class="tab-pane active">
+          <section class="group">
+            <h3>Setup Presets</h3>
+            <div class="grid3">
+              <button class="setupPreset small" id="presetStraight" type="button">Straight</button>
+              <button class="setupPreset small" id="presetHuman" type="button">Human Neutral</button>
+              <button class="setupPreset small" id="presetForward" type="button">Forward Lean</button>
+            </div>
+          </section>
+
+          <section class="group">
+            <h3>Hearing</h3>
+            <div class="hint" style="margin-bottom:6px">Tune the ear so Teela can finish talking. Low barge-in ignores speaker bleed. Sensitivity is how easily your voice starts a turn. The EQ weights frequency bands for voice detection — raise your voice, cut rumble and hiss.</div>
+            <div class="mic-analysis">
+              <div class="hint">Sound analyzer</div>
+              <div class="mic-analyzer" id="micAnalyzer" aria-hidden="true"></div>
+              <div class="mic-vu" id="micVu"><i id="micVuFill"></i><em id="micVuNoise"></em></div>
+              <div class="mic-stats">
+                <span>RMS <b id="micRms">—</b></span>
+                <span>Noise <b id="micNoiseV">—</b></span>
+                <span>Speech <b id="micBandV">—</b></span>
+                <span>Peak <b id="micPeakV">—</b></span>
+              </div>
+              <div class="hint" id="micHearState">Mic idle — start voice chat in Desk to see the analyzer.</div>
+            </div>
+            <div class="slider-row"><label for="micSens">Sensitivity</label><input id="micSens" type="range" min="0" max="100" value="50" step="1"><output id="micSensO">50</output></div>
+            <div class="slider-row"><label for="micBarge">Barge-in</label><input id="micBarge" type="range" min="0" max="100" value="15" step="1"><output id="micBargeO">15</output></div>
+            <div class="slider-row"><label for="micHang">End pause</label><input id="micHang" type="range" min="400" max="2500" value="1200" step="50"><output id="micHangO">1.2s</output></div>
+            <div class="hint" style="margin-top:8px">Sensitivity EQ</div>
+            <div class="mic-eq" id="micEq" aria-label="Microphone sensitivity equalizer"></div>
+            <div class="row" style="margin-top:6px"><button class="small" id="micReset" type="button">Reset hearing</button></div>
+          </section>
+
+          <section class="group">
+            <h3>Spine & Head</h3>
+            <div class="slider-row"><label for="lowerBack">Lower back</label><input class="cal" id="lowerBack" type="range" min="-25" max="35" value="0" step="1"><output id="lowerBackO">0°</output></div>
+            <div class="slider-row"><label for="back">Upper back</label><input class="cal" id="back" type="range" min="-30" max="55" value="0" step="1"><output id="backO">0°</output></div>
+            <div class="slider-row"><label for="headPan">Head pan</label><input class="cal" id="headPan" type="range" min="-70" max="70" value="0" step="1"><output id="headPanO">0°</output></div>
+            <div class="slider-row"><label for="headTilt">Head tilt</label><input class="cal" id="headTilt" type="range" min="-40" max="40" value="0" step="1"><output id="headTiltO">0°</output></div>
+          </section>
+
+          <section class="group">
+            <h3>Left Arm</h3>
+            <div class="slider-row"><label for="shL">Shoulder fwd</label><input class="cal" id="shL" type="range" min="-35" max="155" value="0" step="1"><output id="shLO">0°</output></div>
+            <div class="slider-row"><label for="shOutL">Arm out</label><input class="cal" id="shOutL" type="range" min="0" max="110" value="0" step="1"><output id="shOutLO">0°</output></div>
+            <div class="slider-row"><label for="elL">Elbow</label><input class="cal" id="elL" type="range" min="-120" max="15" value="-5" step="1"><output id="elLO">-5°</output></div>
+            <div class="slider-row"><label for="wrL">Wrist</label><input class="cal" id="wrL" type="range" min="-180" max="180" value="0" step="1"><output id="wrLO">0°</output></div>
+          </section>
+
+          <section class="group">
+            <h3>Right Arm</h3>
+            <div class="slider-row"><label for="shR">Shoulder fwd</label><input class="cal" id="shR" type="range" min="-35" max="155" value="0" step="1"><output id="shRO">0°</output></div>
+            <div class="slider-row"><label for="shOutR">Arm out</label><input class="cal" id="shOutR" type="range" min="0" max="110" value="0" step="1"><output id="shOutRO">0°</output></div>
+            <div class="slider-row"><label for="elR">Elbow</label><input class="cal" id="elR" type="range" min="-120" max="15" value="-5" step="1"><output id="elRO">-5°</output></div>
+            <div class="slider-row"><label for="wrR">Wrist</label><input class="cal" id="wrR" type="range" min="-180" max="180" value="0" step="1"><output id="wrRO">0°</output></div>
+          </section>
+
+          <section class="group">
+            <h3>Left Leg</h3>
+            <div class="slider-row"><label for="hipL">Hip fwd</label><input class="cal" id="hipL" type="range" min="-45" max="90" value="0" step="1"><output id="hipLO">0°</output></div>
+            <div class="slider-row"><label for="hipOutL">Leg out</label><input class="cal" id="hipOutL" type="range" min="0" max="20" value="0" step="1"><output id="hipOutLO">0°</output></div>
+            <div class="slider-row"><label for="kneeL">Knee flex</label><input class="cal" id="kneeL" type="range" min="0" max="110" value="6" step="1"><output id="kneeLO">6°</output></div>
+            <div class="slider-row"><label for="ankleL">Ankle</label><input class="cal" id="ankleL" type="range" min="-40" max="40" value="0" step="1"><output id="ankleLO">0°</output></div>
+          </section>
+
+          <section class="group">
+            <h3>Right Leg</h3>
+            <div class="slider-row"><label for="hipR">Hip fwd</label><input class="cal" id="hipR" type="range" min="-45" max="90" value="0" step="1"><output id="hipRO">0°</output></div>
+            <div class="slider-row"><label for="hipOutR">Leg out</label><input class="cal" id="hipOutR" type="range" min="0" max="20" value="0" step="1"><output id="hipOutRO">0°</output></div>
+            <div class="slider-row"><label for="kneeR">Knee flex</label><input class="cal" id="kneeR" type="range" min="0" max="110" value="6" step="1"><output id="kneeRO">6°</output></div>
+            <div class="slider-row"><label for="ankleR">Ankle</label><input class="cal" id="ankleR" type="range" min="-40" max="40" value="0" step="1"><output id="ankleRO">0°</output></div>
+          </section>
+        </div>
+
+        <div id="tabActions" class="tab-pane">
+          <section class="group">
+            <h3>Walk / Neutral</h3>
+            <div class="grid2">
+              <button class="motionCtl" id="walkLeft" type="button" disabled>← Walk Left · East</button>
+              <button class="motionCtl" id="walkRight" type="button" disabled>Walk Right · West →</button>
+              <button class="motionCtl" id="walkPlace" type="button" disabled>In Place · South</button>
+              <button class="motionCtl" id="walkBack" type="button" disabled>Walk Back · North</button>
+              <button class="motionCtl" id="stopMotion" type="button" disabled>Stop</button>
+            </div>
+            <div class="hint" style="margin-top:6px">Facing you is <strong>south</strong>. Walk left is <strong>east</strong>, walk right is <strong>west</strong>, walk back is <strong>north</strong>.</div>
+            <div class="row" style="margin-top:6px">
+              <button class="motionCtl" id="neutralAction" type="button" disabled>Return to Locked Pose</button>
+            </div>
+          </section>
+
+          <section class="group">
+            <h3>Body Actions</h3>
+            <div class="hint" style="margin-bottom:6px">Forward means anatomical forward. The 90° leg raise puts the femur horizontal and the knee at 90°, with the shin dropping downward. Only one leg pivots outward at a time. Leg Out and 90° Raise plant the stance foot first, then the free leg moves. Kneel left/right lower onto one knee; Kneel Both puts both knees on the ground. The ground-support pose keeps the feet planted while the torso folds and the hands reach the floor.</div>
+            <div class="grid3">
+              <button class="motionCtl small" id="bendForward" disabled>Bend Forward</button>
+              <button class="motionCtl small" id="armsForward" disabled>Arms Forward</button>
+              <button class="motionCtl small" id="armsUp" disabled>Arms Up</button>
+              <button class="motionCtl small" id="tPose" disabled>T Pose</button>
+              <button class="motionCtl small" id="waveRight" disabled>Wave Right</button>
+              <button class="motionCtl small" id="leftLegOut" disabled>Left Leg Out 20°</button>
+              <button class="motionCtl small" id="rightLegOut" disabled>Right Leg Out 20°</button>
+              <button class="motionCtl small" id="leftLegForward" disabled>Left 90° Raise</button>
+              <button class="motionCtl small" id="legsNeutral" disabled>Legs Neutral</button>
+              <button class="motionCtl small" id="rightLegForward" disabled>Right 90° Raise</button>
+              <button class="motionCtl small" id="kneelLeft" disabled>Kneel Left</button>
+              <button class="motionCtl small" id="kneelBoth" disabled>Kneel Both</button>
+              <button class="motionCtl small" id="kneelRight" disabled>Kneel Right</button>
+              <button class="motionCtl small" id="groundPose" disabled>Ground Support</button>
+            </div>
+          </section>
+
+          <section class="group">
+            <h3>Head Controls</h3>
+            <div class="hint" style="margin-bottom:6px">Nudges from the locked pose. The rest of the body stays put.</div>
+            <div class="grid3">
+              <button class="motionCtl small" id="headLeft" disabled>Head Left</button>
+              <button class="motionCtl small" id="headCenter" disabled>Center</button>
+              <button class="motionCtl small" id="headRight" disabled>Head Right</button>
+              <button class="motionCtl small" id="headUp" disabled>Head Up</button>
+              <button class="motionCtl small" id="headLevel" disabled>Level</button>
+              <button class="motionCtl small" id="headDown" disabled>Head Down</button>
+            </div>
+          </section>
+
+          <section class="group">
+            <h3>Locked Parts</h3>
+            <div class="hint" style="margin-bottom:6px">After lock, move any part in either direction. The bot uses these same directions so one joint does not reset the others.</div>
+            <div id="partControls"></div>
+          </section>
+
+          <section class="group">
+            <h3>Keyboard</h3>
+            <div class="hint">
+              After locking: <kbd>A</kbd>/<kbd>←</kbd> walk left (east),
+              <kbd>D</kbd>/<kbd>→</kbd> walk right (west),
+              <kbd>S</kbd>/<kbd>↓</kbd> walk back (north),
+              <kbd>Space</kbd> stop,
+              <kbd>N</kbd> locked neutral. Facing you is south.
+            </div>
+          </section>
+        </div>
+
+        <div id="tabWalk" class="tab-pane">
+          <section class="group">
+            <h3>Natural Walk Tuning</h3>
+            <div class="slider-row"><label for="speed">Speed</label><input id="speed" type="range" min=".25" max="1.8" step=".05" value="1" disabled><output id="speedO">1.00×</output></div>
+            <div class="slider-row"><label for="stride">Stride</label><input id="stride" type="range" min="40" max="125" step="1" value="90" disabled><output id="strideO">90%</output></div>
+            <div class="slider-row"><label for="armSwing">Arm swing</label><input id="armSwing" type="range" min="0" max="130" step="1" value="90" disabled><output id="armSwingO">90%</output></div>
+            <div class="slider-row"><label for="sway">Hip sway</label><input id="sway" type="range" min="0" max="130" step="1" value="75" disabled><output id="swayO">75%</output></div>
+          </section>
+
+          <section class="group">
+            <h3>Live State</h3>
+            <div class="stats">
+              <span class="k">Setup</span><span class="v" id="setupState">UNLOCKED</span>
+              <span class="k">Motion</span><span class="v" id="motionState">DISABLED</span>
+              <span class="k">Facing</span><span class="v" id="facingState">south</span>
+              <span class="k">Direction</span><span class="v" id="direction">—</span>
+              <span class="k">Gait phase</span><span class="v" id="phase">0°</span>
+              <span class="k">Lower back</span><span class="v" id="liveLowerBack">0°</span>
+              <span class="k">Upper back</span><span class="v" id="liveBack">0°</span>
+              <span class="k">Head pan</span><span class="v" id="livePan">0°</span>
+              <span class="k">Head tilt</span><span class="v" id="liveTilt">0°</span>
+            </div>
+          </section>
+
+          <section class="group">
+            <h3>Walk Model</h3>
+            <div class="hint">
+              The gait keeps the knee in normal backward flexion only. During swing the knee folds first, then the femur advances, then the shin extends downward for heel strike. Lower-back motion is small and upper-back motion is slightly larger, while hip-out and arm-out controls remain available for poses like T-pose and ground support.
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-note">
+      Tip: resize the browser freely. The 3D view stays visible while the controls reflow. Front / Side / Back now pan smoothly between views instead of snapping instantly. Double-click the viewer to ease back to the front view.
+    </div>
+  </aside>
+
+  <main class="stage">
+    <canvas id="gl"></canvas>
+    <div class="hud" id="hud">MODEL: PREPARING
+MODE: CALIBRATION
+MOTION: LOCKED OUT</div>
+    <div class="compass" id="compass" aria-label="Compass: facing you is south">
+      <span class="compass-n" data-heading="north">N</span>
+      <span class="compass-e" data-heading="east">E</span>
+      <span class="compass-s" data-heading="south">S</span>
+      <span class="compass-w" data-heading="west">W</span>
+      <span class="compass-needle" id="compassNeedle"></span>
+    </div>
+
+    <div class="loading" id="loading">
+      <div>
+        <strong>Preparing solid articulated skeleton…</strong>
+        <span id="loadStatus">Loading Las Catrina skeleton</span>
+      </div>
+    </div>
+    <div id="error"></div>
+  </main>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+const DEG = Math.PI / 180;
+const ELBOW_UI_MAX = 15;
+const ELBOW_UI_MIN = -120;
+
+const defs = {
+  neck_pan: {min:-70, max:70},
+  neck_tilt: {min:-40, max:40},
+  left_shoulder: {min:-35, max:155},
+  left_shoulder_out: {min:0, max:110},
+  left_elbow: {min:0, max:135},
+  left_wrist: {min:-180, max:180},
+  right_shoulder: {min:-35, max:155},
+  right_shoulder_out: {min:0, max:110},
+  right_elbow: {min:0, max:135},
+  right_wrist: {min:-180, max:180},
+  upper_back_pitch: {min:-30, max:55},
+  lower_back_pitch: {min:-25, max:35},
+  lower_back_roll: {min:-25, max:25},
+  left_hip: {min:-45, max:90},
+  left_hip_out: {min:0, max:20},
+  left_knee: {min:0, max:120},
+  left_ankle: {min:-40, max:40},
+  right_hip: {min:-45, max:90},
+  right_hip_out: {min:0, max:20},
+  right_knee: {min:0, max:120},
+  right_ankle: {min:-40, max:40}
+};
+
+const aliases = {
+  neck_yaw: "neck_pan",
+  neck_pitch: "neck_tilt",
+  torso_yaw: "lower_back_roll",
+  left_arm_out: "left_shoulder_out",
+  right_arm_out: "right_shoulder_out",
+  left_leg_out: "left_hip_out",
+  right_leg_out: "right_hip_out"
+};
+
+function emptyJoints(){
+  const o = {};
+  Object.keys(defs).forEach(k => { o[k] = 0; });
+  o.left_elbow = 0;
+  o.right_elbow = 0;
+  o.left_knee = 0;
+  o.right_knee = 0;
+  return o;
+}
+function completeJoints(src){
+  const out = emptyJoints();
+  if(src && typeof src === "object"){
+    Object.keys(defs).forEach(k => {
+      if(src[k] == null) return;
+      const n = Number(src[k]);
+      if(Number.isFinite(n)) out[k] = n;
+    });
+  }
+  return out;
+}
+const ARM_JOINTS = [
+  "left_shoulder","left_shoulder_out","left_elbow","left_wrist",
+  "right_shoulder","right_shoulder_out","right_elbow","right_wrist"
+];
+function copyArmJoints(dest, src){
+  ARM_JOINTS.forEach(k => {
+    const n = Number(src && src[k] != null ? src[k] : 0);
+    dest[k] = Number.isFinite(n) ? n : 0;
+  });
+  return dest;
+}
+function restArms(dest, elbow){
+  dest.left_shoulder = 0;
+  dest.left_shoulder_out = 0;
+  dest.left_wrist = 0;
+  dest.right_shoulder = 0;
+  dest.right_shoulder_out = 0;
+  dest.right_wrist = 0;
+  dest.left_elbow = elbow == null ? 5 : elbow;
+  dest.right_elbow = elbow == null ? 5 : elbow;
+  return dest;
+}
+let gestureTarget = emptyJoints();
+let gestureCurrent = emptyJoints();
+function composeLockedPose(){
+  const hold = completeJoints(lockedPose);
+  Object.keys(defs).forEach(k => {
+    hold[k] = (Number(lockedPose[k]||0)||0) + (Number(gestureCurrent[k]||0)||0);
+  });
+  return hold;
+}
+function applyLockedTargets(){
+  const hold = completeJoints(lockedPose);
+  Object.keys(defs).forEach(k => {
+    hold[k] = (Number(lockedPose[k]||0)||0) + (Number(gestureTarget[k]||0)||0);
+  });
+  setTargets(hold, true);
+  return hold;
+}
+function stopWaving(){
+  // teela_v2: waving=false. Overlay must not run after Arms Forward / Stop.
+  waving = false;
+  waveIntent = false;
+  waveBlend = 0;
+  waveStarted = 0;
+  if(state.motion === "waving") state.motion = "idle";
+}
+function applyGestureMap(offsets){
+  gestureTarget = emptyJoints();
+  Object.assign(gestureTarget, offsets || {});
+  applyLockedTargets();
+}
+function setGesture(offsets){
+  // teela_v2 setGesture: walking=false, waving=false, blankOffsets, assign.
+  if(walkTimer){ clearInterval(walkTimer); walkTimer = null; }
+  pendingMove = null;
+  pendingWalkDir = null;
+  reverseStage = null;
+  stopWaving();
+  state.motion = "idle";
+  if(isKneeling()){
+    startGestureSteps("custom", [{offsets: offsets || {}, drop: 0}]);
+    return;
+  }
+  gestureSteps = null;
+  kneelDropTarget = 0;
+  applyGestureMap(offsets);
+}
+function gestureOffsetsFromHold(hold){
+  const offsets = emptyJoints();
+  const base = completeJoints(lockedPose);
+  Object.keys(defs).forEach(k => {
+    offsets[k] = (Number(hold[k]||0)||0) - (Number(base[k]||0)||0);
+  });
+  return offsets;
+}
+function startWave(side, source){
+  // Absolute hold relative to locked pose, then overlay on THAT arm only.
+  source = source || "UI";
+  side = String(side||"right").toLowerCase() === "left" ? "left" : "right";
+  if(state.estop) return {ok:false, error:"E-STOP is active"};
+  if(!state.motors) return {ok:false, error:"Motors are disabled"};
+  if(source !== "demo" && source !== "walk" && source !== "hydrate") stopDemo();
+  if(source !== "hydrate") ensureLocked(true);
+  const lp = completeJoints(lockedPose);
+  const offsets = {};
+  offsets[side+"_shoulder"] = 24 - (lp[side+"_shoulder"]||0);
+  offsets[side+"_shoulder_out"] = 0 - (lp[side+"_shoulder_out"]||0);
+  offsets[side+"_elbow"] = 118 - (lp[side+"_elbow"]||0);
+  offsets[side+"_wrist"] = 0 - (lp[side+"_wrist"]||0);
+  setGesture(offsets);
+  waveSide = side;
+  waveIntent = true;
+  waving = true;
+  waveBlend = 1;
+  waveStarted = performance.now();
+  state.pose = "wave";
+  state.motion = source === "demo" ? "demo" : "waving";
+  log((source||"control")+": wave — "+side+" wrist stays 0°");
+  if(source === "UI") persistUi();
+  emit();
+  return {ok:true};
+}
+function startWaveRight(source){ return startWave("right", source); }
+function waveHoldSide(map){
+  map = map || {};
+  const l = Number(map.left_elbow||0) >= 90 && Number(map.left_shoulder||0) >= 15;
+  const r = Number(map.right_elbow||0) >= 90 && Number(map.right_shoulder||0) >= 15;
+  if(l && !r) return "left";
+  if(r && !l) return "right";
+  return "";
+}
+function returnNeutral(){
+  // teela_v2: stopAll + blankOffsets. Gesture eases back to the locked pose.
+  stopDemo();
+  if(walkTimer){ clearInterval(walkTimer); walkTimer = null; }
+  pendingMove = null;
+  pendingWalkDir = null;
+  reverseStage = null;
+  stopWaving();
+  state.motion = "idle";
+  state.walkDir = "place";
+  state.heading = "south";
+  if(isKneeling()){
+    startGestureSteps("custom", [{offsets: {}, drop: 0}]);
+    return {ok:true};
+  }
+  gestureSteps = null;
+  kneelDropTarget = 0;
+  gestureTarget = emptyJoints();
+  applyLockedTargets();
+  state.pose = "custom";
+  persistUi();
+  emit();
+  return {ok:true};
+}
+function applySetupPreset(name){
+  if(state.locked) return;
+  const hold = completeJoints(poses.home);
+  restArms(hold, 5);
+  if(name === "straight"){
+    hold.left_elbow = 0; hold.right_elbow = 0; hold.left_knee = 0; hold.right_knee = 0;
+  } else if(name === "human_neutral"){
+    hold.left_elbow = 8; hold.right_elbow = 8;
+    hold.left_hip = 1; hold.right_hip = 1;
+    hold.left_knee = 6; hold.right_knee = 6;
+  } else if(name === "forward_lean"){
+    hold.lower_back_pitch = 10; hold.upper_back_pitch = 18; hold.neck_tilt = 4;
+    hold.left_hip = -2; hold.right_hip = -2; hold.left_knee = 8; hold.right_knee = 8;
+  }
+  gestureTarget = emptyJoints();
+  setTargets(hold, true);
+  Object.assign(state.joints, targets);
+  liveJoints = Object.assign({}, targets);
+  state.pose = name === "home" ? "home" : name;
+  persistUi();
+  emit();
+  syncSliders();
+}
+
+const poses = {
+  home: (() => {
+    const j = emptyJoints();
+    j.left_elbow=5; j.right_elbow=5; j.left_knee=6; j.right_knee=6;
+    return j;
+  })(),
+  straight: (() => { const j = emptyJoints(); j.left_elbow=0; j.right_elbow=0; j.left_knee=0; j.right_knee=0; return j; })(),
+  human_neutral: (() => {
+    const j = emptyJoints();
+    j.left_elbow=8; j.right_elbow=8; j.left_knee=6; j.right_knee=6;
+    j.left_hip=1; j.right_hip=1;
+    return j;
+  })(),
+  forward_lean: (() => {
+    const j = emptyJoints();
+    j.upper_back_pitch=18; j.lower_back_pitch=10; j.neck_tilt=4;
+    j.left_hip=-2; j.right_hip=-2; j.left_knee=8; j.right_knee=8;
+    return j;
+  })(),
+  neutral: (() => { const j=emptyJoints(); j.left_elbow=4; j.right_elbow=4; j.left_knee=3; j.right_knee=3; return j; })(),
+  relaxed: (() => {
+    const j=emptyJoints();
+    j.neck_pan=6; j.neck_tilt=2; j.left_shoulder=-5; j.left_elbow=14; j.left_wrist=4;
+    j.right_shoulder=4; j.right_elbow=10; j.right_wrist=-3; j.upper_back_pitch=2; j.lower_back_roll=3;
+    j.left_hip=-2; j.left_knee=5; j.left_ankle=1; j.right_hip=4; j.right_knee=12; j.right_ankle=-3;
+    return j;
+  })(),
+  attention: emptyJoints(),
+  ready: (() => {
+    const j=emptyJoints();
+    j.left_shoulder=24; j.left_elbow=42; j.left_wrist=8; j.right_shoulder=24; j.right_elbow=42; j.right_wrist=-8;
+    j.upper_back_pitch=3; j.left_hip=12; j.left_knee=22; j.left_ankle=-5; j.right_hip=12; j.right_knee=22; j.right_ankle=-5;
+    return j;
+  })(),
+  sit: (() => {
+    const j=emptyJoints();
+    j.neck_tilt=4; j.left_shoulder=8; j.left_elbow=38; j.right_shoulder=8; j.right_elbow=38;
+    j.upper_back_pitch=8; j.left_hip=58; j.left_knee=92; j.left_ankle=10; j.right_hip=58; j.right_knee=92; j.right_ankle=10;
+    return j;
+  })(),
+  bow: (() => {
+    const j=emptyJoints();
+    j.neck_tilt=-6; j.upper_back_pitch=22; j.lower_back_pitch=12;
+    j.left_hip=4; j.left_knee=8; j.right_hip=4; j.right_knee=8;
+    return j;
+  })(),
+  lean_left: (() => { const j=emptyJoints(); j.lower_back_roll=-12; j.left_knee=4; j.right_knee=8; return j; })(),
+  lean_right: (() => { const j=emptyJoints(); j.lower_back_roll=12; j.left_knee=8; j.right_knee=4; return j; })(),
+  hands_up: (() => {
+    const j=emptyJoints();
+    j.left_shoulder=142; j.left_elbow=12; j.right_shoulder=142; j.right_elbow=12;
+    return j;
+  })(),
+  tpose: (() => {
+    const j=emptyJoints();
+    j.left_shoulder_out=90; j.right_shoulder_out=90; j.left_elbow=0; j.right_elbow=0; j.left_knee=0; j.right_knee=0;
+    return j;
+  })(),
+  wave: (() => {
+    const j=emptyJoints();
+    // teela_v2 approved wave: shoulder fwd 24°, arm out 0°, elbow 118° (stored positive here).
+    j.right_shoulder=24; j.right_shoulder_out=0; j.right_elbow=118; j.right_wrist=0;
+    j.left_knee=4; j.right_knee=4;
+    return j;
+  })(),
+  squat: (() => {
+    const j=emptyJoints();
+    j.neck_tilt=6; j.left_shoulder=28; j.left_elbow=22; j.right_shoulder=28; j.right_elbow=22;
+    j.upper_back_pitch=8; j.left_hip=48; j.left_knee=78; j.left_ankle=12; j.right_hip=48; j.right_knee=78; j.right_ankle=12;
+    return j;
+  })(),
+  shrug: (() => {
+    const j=emptyJoints();
+    j.neck_tilt=2; j.left_shoulder=48; j.left_elbow=72; j.left_wrist=10; j.right_shoulder=48; j.right_elbow=72; j.right_wrist=-10;
+    j.upper_back_pitch=4; j.left_knee=4; j.right_knee=4;
+    return j;
+  })(),
+  arms_forward: (() => {
+    const j=emptyJoints();
+    j.left_shoulder=78; j.right_shoulder=78; j.left_elbow=8; j.right_elbow=8;
+    return j;
+  })(),
+  bend_forward: (() => {
+    const j=emptyJoints();
+    j.upper_back_pitch=24; j.lower_back_pitch=14;
+    return j;
+  })(),
+  ground_support: (() => {
+    const j=emptyJoints();
+    j.lower_back_pitch=20; j.upper_back_pitch=34;
+    j.left_shoulder=18; j.right_shoulder=18; j.left_shoulder_out=8; j.right_shoulder_out=8;
+    j.left_elbow=12; j.right_elbow=12; j.left_wrist=8; j.right_wrist=8;
+    j.left_knee=20; j.right_knee=20;
+    return j;
+  })(),
+  left_leg_out: (() => { const j=emptyJoints(); j.left_hip_out=20; j.right_hip_out=0; return j; })(),
+  right_leg_out: (() => { const j=emptyJoints(); j.right_hip_out=20; j.left_hip_out=0; return j; })(),
+  left_leg_raise: (() => { const j=emptyJoints(); j.left_hip=90; j.left_knee=90; j.right_knee=6; return j; })(),
+  right_leg_raise: (() => { const j=emptyJoints(); j.right_hip=90; j.right_knee=90; j.left_knee=6; return j; })(),
+  kneel_right: (() => {
+    const j=emptyJoints();
+    j.left_hip=90; j.left_knee=63; j.left_ankle=25;
+    j.right_hip=0; j.right_knee=100; j.right_ankle=40;
+    j.lower_back_pitch=8; j.lower_back_roll=6;
+    j.left_shoulder=16; j.right_shoulder=16; j.left_elbow=22; j.right_elbow=22;
+    return j;
+  })(),
+  kneel_left: (() => {
+    const j=emptyJoints();
+    j.left_hip=0; j.left_knee=100; j.left_ankle=40;
+    j.right_hip=90; j.right_knee=63; j.right_ankle=25;
+    j.lower_back_pitch=8; j.lower_back_roll=-6;
+    j.left_shoulder=16; j.right_shoulder=16; j.left_elbow=22; j.right_elbow=22;
+    return j;
+  })(),
+  kneel_both: (() => {
+    const j=emptyJoints();
+    j.left_hip=0; j.left_knee=100; j.left_ankle=40;
+    j.right_hip=0; j.right_knee=100; j.right_ankle=40;
+    j.lower_back_pitch=8;
+    j.left_shoulder=16; j.right_shoulder=16; j.left_elbow=22; j.right_elbow=22;
+    return j;
+  })()
+};
+
+const SLIDERS = [
+  ["lowerBack","lower_back_pitch",false],
+  ["back","upper_back_pitch",false],
+  ["headPan","neck_pan",false],
+  ["headTilt","neck_tilt",false],
+  ["shL","left_shoulder",false],
+  ["shOutL","left_shoulder_out",false],
+  ["elL","left_elbow",true],
+  ["wrL","left_wrist",false],
+  ["shR","right_shoulder",false],
+  ["shOutR","right_shoulder_out",false],
+  ["elR","right_elbow",true],
+  ["wrR","right_wrist",false],
+  ["hipL","left_hip",false],
+  ["hipOutL","left_hip_out",false],
+  ["kneeL","left_knee",false],
+  ["ankleL","left_ankle",false],
+  ["hipR","right_hip",false],
+  ["hipOutR","right_hip_out",false],
+  ["kneeR","right_knee",false],
+  ["ankleR","right_ankle",false]
+];
+
+const PART_META = {
+  lower_back_pitch: {label:"Lower back", minus:"Back", plus:"Fwd", minusDir:-1, plusDir:1, step:6},
+  upper_back_pitch: {label:"Upper back", minus:"Back", plus:"Fwd", minusDir:-1, plusDir:1, step:6},
+  neck_pan: {label:"Head pan", minus:"Left", plus:"Right", minusDir:-1, plusDir:1, step:8},
+  neck_tilt: {label:"Head tilt", minus:"Down", plus:"Up", minusDir:-1, plusDir:1, step:6},
+  left_shoulder: {label:"L shoulder", minus:"Back", plus:"Fwd", minusDir:-1, plusDir:1, step:8},
+  left_shoulder_out: {label:"L arm out", minus:"In", plus:"Out", minusDir:-1, plusDir:1, step:8},
+  left_elbow: {label:"L elbow", minus:"Straight", plus:"Flex", minusDir:-1, plusDir:1, step:8},
+  left_wrist: {label:"L wrist", minus:"−", plus:"+", minusDir:-1, plusDir:1, step:10},
+  right_shoulder: {label:"R shoulder", minus:"Back", plus:"Fwd", minusDir:-1, plusDir:1, step:8},
+  right_shoulder_out: {label:"R arm out", minus:"In", plus:"Out", minusDir:-1, plusDir:1, step:8},
+  right_elbow: {label:"R elbow", minus:"Straight", plus:"Flex", minusDir:-1, plusDir:1, step:8},
+  right_wrist: {label:"R wrist", minus:"−", plus:"+", minusDir:-1, plusDir:1, step:10},
+  left_hip: {label:"L hip", minus:"Back", plus:"Fwd", minusDir:-1, plusDir:1, step:8},
+  left_hip_out: {label:"L leg out", minus:"In", plus:"Out", minusDir:-1, plusDir:1, step:4},
+  left_knee: {label:"L knee", minus:"Straight", plus:"Flex", minusDir:-1, plusDir:1, step:8},
+  left_ankle: {label:"L ankle", minus:"Down", plus:"Up", minusDir:-1, plusDir:1, step:6},
+  right_hip: {label:"R hip", minus:"Back", plus:"Fwd", minusDir:-1, plusDir:1, step:8},
+  right_hip_out: {label:"R leg out", minus:"In", plus:"Out", minusDir:-1, plusDir:1, step:4},
+  right_knee: {label:"R knee", minus:"Straight", plus:"Flex", minusDir:-1, plusDir:1, step:8},
+  right_ankle: {label:"R ankle", minus:"Down", plus:"Up", minusDir:-1, plusDir:1, step:6},
+  lower_back_roll: {label:"Spine roll", minus:"Left", plus:"Right", minusDir:-1, plusDir:1, step:6}
+};
+const DIR_SIGN = {
+  neck_pan: {left:-1, right:1},
+  neck_tilt: {up:1, down:-1},
+  left_shoulder: {fwd:1, forward:1, up:1, back:-1, down:-1},
+  right_shoulder: {fwd:1, forward:1, up:1, back:-1, down:-1},
+  left_shoulder_out: {out:1, in:-1},
+  right_shoulder_out: {out:1, in:-1},
+  left_elbow: {flex:1, bend:1, straight:-1, extend:-1},
+  right_elbow: {flex:1, bend:1, straight:-1, extend:-1},
+  left_wrist: {up:1, in:1, down:-1, out:-1},
+  right_wrist: {up:1, in:1, down:-1, out:-1},
+  left_hip: {fwd:1, forward:1, up:1, back:-1, down:-1},
+  right_hip: {fwd:1, forward:1, up:1, back:-1, down:-1},
+  left_hip_out: {out:1, in:-1},
+  right_hip_out: {out:1, in:-1},
+  left_knee: {flex:1, bend:1, straight:-1, extend:-1},
+  right_knee: {flex:1, bend:1, straight:-1, extend:-1},
+  left_ankle: {up:1, flex:1, down:-1},
+  right_ankle: {up:1, flex:1, down:-1},
+  upper_back_pitch: {fwd:1, forward:1, down:1, back:-1, up:-1},
+  lower_back_pitch: {fwd:1, forward:1, down:1, back:-1, up:-1},
+  lower_back_roll: {right:1, left:-1}
+};
+
+function canonicalJoint(name){ return aliases[name] || name; }
+function clampJoint(name, value){
+  name = canonicalJoint(name);
+  const d = defs[name];
+  if(!d) return null;
+  const n = Number(value);
+  if(!Number.isFinite(n)) return null;
+  return Math.max(d.min, Math.min(d.max, n));
+}
+function uiElbow(v){ return Math.max(ELBOW_UI_MIN, Math.min(ELBOW_UI_MAX, -Number(v||0))); }
+function fromUiElbow(v){ return clampJoint("left_elbow", -Number(v||0)); }
+function jv(joints, name){ return Number(joints[name]||0) || 0; }
+
+const state = {
+  joints: Object.assign({}, poses.home),
+  motors: true,
+  estop: false,
+  gravity: true,
+  battery: 94,
+  pose: "home",
+  motion: "idle",
+  seq: 0,
+  eyeStreams: {left:"", right:""},
+  locked: false,
+  walkDir: "place",
+  heading: "south"
+};
+const targets = Object.assign({}, poses.home);
+const listeners = new Set();
+const logs = [];
+let demoTimer = null;
+let walkTimer = null;
+let walkStarted = 0;
+let waveStarted = 0;
+const WAVE_MS = 2800;
+let appliedSeq = -1;
+let animating = false;
+let uiHoldUntil = 0;
+let persistTimer = 0;
+let userCalibrating = false;
+let lockedPose = Object.assign({}, poses.home);
+let worldX = 0;
+let floorScrollX = 0;
+let floorScrollZ = 0;
+let faceYaw = 0;
+let reverseStage = null;
+let reverseFromDir = "place";
+let pendingWalkDir = null;
+let stopClock = 0;
+let turnClock = 0;
+let turnFoot = 0;
+let gaitPhase = 0;
+let gaitBlend = 0;
+let waveBlend = 0;
+let waving = false;
+let waveIntent = false;
+let waveSide = "right";
+let liveJoints = Object.assign({}, poses.home);
+let rootY = 0;
+let rootLateral = 0;
+let rootBob = 0;
+let kneelDrop = 0;
+let kneelDropTarget = 0;
+const KNEEL_DROP = 0.30;
+let bodyLean = 0;
+let pelvisRoll = 0;
+let pelvisYaw = 0;
+let lastFrame = 0;
+let walkSpeed = 1;
+let stridePct = 90;
+let armSwingPct = 90;
+let swayPct = 75;
+let actionHold = null;
+let pendingMove = null;
+let gestureSteps = null;
+const LEG_JOINTS = ["left_hip","left_knee","left_ankle","left_hip_out","right_hip","right_knee","right_ankle","right_hip_out"];
+
+function log(msg){
+  const t = new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  logs.unshift(t + "  " + msg);
+  if(logs.length > 80) logs.length = 80;
+}
+function snapshot(){
+  return JSON.parse(JSON.stringify(Object.assign({}, state, {
+    logs: logs.slice(0, 30),
+    joints: Object.assign({}, targets),
+    live: Object.assign({}, liveJoints || targets),
+    walk_direction: state.walkDir,
+    heading: state.heading || headingOf(state.walkDir)
+  })));
+}
+function isLocomoting(){
+  return state.motion === "walking" || reverseStage === "turning" || reverseStage === "stopping";
+}
+function emit(){
+  state.seq++;
+  listeners.forEach(fn => { try{ fn(snapshot()); }catch(_){} });
+}
+function markUiEdit(){ uiHoldUntil = performance.now() + 12000; }
+function uiHeld(){ return performance.now() < uiHoldUntil; }
+function status(){ return snapshot(); }
+
+function setTargets(map, replaceAll){
+  if(!map) return;
+  const src = replaceAll ? completeJoints(map) : map;
+  Object.keys(src).forEach(name => {
+    const v = clampJoint(name, src[name]);
+    if(v != null) targets[name] = v;
+  });
+}
+
+function persistUi(){
+  markUiEdit();
+  const snap = status();
+  const wavingNow = snap.pose === "wave" && snap.motion === "waving";
+  const named = !!(poses[snap.pose]);
+  try{
+    window.parent.postMessage({
+      type: "robot-edit",
+      cmd: wavingNow || named ? "pose" : "joints",
+      pose: snap.pose,
+      motion: wavingNow ? "waving" : (snap.motion === "waving" ? "idle" : snap.motion),
+      joints: snap.joints,
+      live: snap.live,
+      seq: snap.seq
+    }, "*");
+  }catch(_){}
+  emitVirtualBodyState(true);
+}
+let lastLiveSent = 0;
+let lastLiveJson = "";
+function persistLiveIfChanged(){
+  const now = performance.now();
+  if(now - lastLiveSent < 280) return;
+  const live = Object.assign({}, liveJoints || targets);
+  const cycle = (((gaitPhase / (Math.PI * 2)) % 1) + 1) % 1;
+  const phase = state.motion === "walking" ? cycle : null;
+  const json = JSON.stringify({pose: state.pose, motion: state.motion, waving: !!waving, live, phase});
+  if(json === lastLiveJson) return;
+  lastLiveJson = json;
+  lastLiveSent = now;
+  try{
+    window.parent.postMessage({
+      type: "robot-edit",
+      cmd: "live",
+      live,
+      pose: state.pose,
+      motion: state.motion,
+      waving: !!waving,
+      phase,
+      seq: state.seq
+    }, "*");
+  }catch(_){}
+  emitVirtualBodyState(false);
+}
+function persistUiSoon(){
+  markUiEdit();
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(persistUi, 180);
+}
+let lastVirtualStateSent = 0;
+let lastVirtualStateJson = "";
+function emitVirtualBodyState(force){
+  if(!window.virtualBody) return;
+  const now = performance.now();
+  if(!force && now - lastVirtualStateSent < 400) return;
+  const st = virtualBody.getState();
+  const json = JSON.stringify({
+    locked: st.locked, motion: st.motion, pose: st.pose,
+    joints: st.joints, action: st.action
+  });
+  if(!force && json === lastVirtualStateJson) return;
+  lastVirtualStateJson = json;
+  lastVirtualStateSent = now;
+  try{
+    window.parent.postMessage(Object.assign({type:"body_state"}, st), "*");
+  }catch(_){}
+}
+
+function stopDemo(){
+  if(demoTimer){ clearInterval(demoTimer); demoTimer = null; }
+  if(walkTimer){ clearInterval(walkTimer); walkTimer = null; }
+  if(state.motion === "demo" || state.motion === "walking") state.motion = "idle";
+  actionHold = null;
+  pendingMove = null;
+  gestureSteps = null;
+  reverseStage = null;
+  pendingWalkDir = null;
+  syncWalkButtons();
+}
+
+function jointGoal(name){
+  if(targets[name] != null) return Number(targets[name]) || 0;
+  if(state.joints[name] != null) return Number(state.joints[name]) || 0;
+  return 0;
+}
+function dirSign(name, dir){
+  const key = String(dir||"").toLowerCase();
+  const table = DIR_SIGN[name];
+  if(table && table[key] != null) return table[key];
+  if(key === "plus" || key === "+" || key === "inc") return 1;
+  if(key === "minus" || key === "-" || key === "dec") return -1;
+  const n = Number(dir);
+  if(Number.isFinite(n) && n !== 0) return n > 0 ? 1 : -1;
+  return 0;
+}
+function nudgeJoint(name, dir, source, delta){
+  name = canonicalJoint(name);
+  if(!defs[name]) return {ok:false, error:"Unknown joint: "+name};
+  if(state.estop) return {ok:false, error:"E-STOP is active"};
+  if(!state.motors) return {ok:false, error:"Motors are disabled"};
+  const meta = PART_META[name] || {step:8};
+  let step = Number(delta);
+  if(!Number.isFinite(step)) step = meta.step || 8;
+  const sign = typeof dir === "number" ? (dir < 0 ? -1 : 1) : dirSign(name, dir);
+  if(!sign) return {ok:false, error:"Unknown direction for "+name};
+  return setJoint(name, jointGoal(name) + sign * Math.abs(step), source || "UI");
+}
+function poseOverlay(name){
+  const p = poses[name] || {};
+  const home = poses.home || {};
+  const out = {};
+  Object.keys(defs).forEach(k => {
+    if(Math.abs((p[k]||0) - (home[k]||0)) > 0.5) out[k] = p[k];
+  });
+  if(name === "wave"){
+    out.right_wrist = 0;
+    delete out.left_shoulder;
+    delete out.left_shoulder_out;
+    delete out.left_elbow;
+    delete out.left_wrist;
+  }
+  return out;
+}
+
+function setJoint(name, value, source){
+  name = canonicalJoint(name);
+  if(!defs[name]) return {ok:false, error:"Unknown joint: "+name};
+  if(state.estop) return {ok:false, error:"E-STOP is active"};
+  if(!state.motors) return {ok:false, error:"Motors are disabled"};
+  const v = clampJoint(name, value);
+  if(v == null) return {ok:false, error:"Invalid angle"};
+  if(state.locked){
+    gestureTarget[name] = v - (Number(lockedPose[name]||0)||0);
+    applyLockedTargets();
+  } else {
+    setTargets({[name]: v});
+  }
+  state.pose = "custom";
+  if(source === "UI") persistUiSoon();
+  log((source||"control")+": "+name+" → "+v.toFixed(0)+" deg");
+  emit();
+  return {ok:true, value:v, joint:name};
+}
+
+function applyPose(name, source, overlay, motionHint){
+  if(!poses[name]) return {ok:false, error:"Unknown pose: "+name};
+  if(state.estop) return {ok:false, error:"E-STOP is active"};
+  if(!state.motors) return {ok:false, error:"Motors are disabled"};
+  if(source !== "demo" && source !== "walk" && source !== "hydrate") stopDemo();
+  const hold = (state.locked && lockedPose && source !== "hydrate")
+    ? Object.assign(completeJoints(lockedPose), poseOverlay(name))
+    : completeJoints(poses[name]);
+  if(overlay && typeof overlay === "object"){
+    Object.keys(overlay).forEach(k => {
+      const v = clampJoint(k, overlay[k]);
+      if(v != null) hold[k] = v;
+    });
+  }
+  if(name === "wave"){
+    const hint = String(motionHint||"");
+    const fromUser = source === "UI" || source === "demo";
+    const fromAgent = (source === "agent" || source === "grok-desk") && hint !== "idle";
+    if((fromUser || fromAgent) && source !== "hydrate" && source !== "status"){
+      return startWaveRight(source);
+    }
+    stopWaving();
+    state.pose = "wave";
+    state.motion = "idle";
+    if(source === "UI") persistUi();
+    emit();
+    return {ok:true};
+  }
+  if(state.locked && source !== "hydrate"){
+    if(name === "left_leg_out" || name === "right_leg_out"){
+      startLegOut(name === "left_leg_out" ? "left" : "right");
+      state.motion = source === "demo" ? "demo" : "idle";
+      log((source||"control")+": pose "+name);
+      return {ok:true};
+    }
+    if(name === "left_leg_raise" || name === "right_leg_raise"){
+      startLegRaise(name === "left_leg_raise" ? "left" : "right");
+      state.motion = source === "demo" ? "demo" : "idle";
+      log((source||"control")+": pose "+name);
+      return {ok:true};
+    }
+    if(name === "kneel_left" || name === "kneel_right" || name === "kneel_both"){
+      startKneel(name === "kneel_both" ? "both" : (name === "kneel_left" ? "left" : "right"));
+      state.motion = source === "demo" ? "demo" : "idle";
+      log((source||"control")+": pose "+name);
+      return {ok:true};
+    }
+    setGesture(gestureOffsetsFromHold(hold));
+    state.pose = name;
+    state.motion = source === "demo" ? "demo" : "idle";
+    log((source||"control")+": pose "+name);
+    if(source === "UI") persistUi();
+    emit();
+    return {ok:true};
+  }
+  setTargets(hold, true);
+  if(!state.locked){
+    Object.assign(state.joints, targets);
+    liveJoints = Object.assign({}, targets);
+  }
+  if(name === "kneel_left" || name === "kneel_right" || name === "kneel_both"){
+    kneelDropTarget = KNEEL_DROP;
+    if(source === "hydrate") kneelDrop = KNEEL_DROP;
+  } else {
+    kneelDropTarget = 0;
+    if(source === "hydrate") kneelDrop = 0;
+  }
+  state.pose = name;
+  stopWaving();
+  state.motion = source === "demo" ? "demo" : "idle";
+  log((source||"control")+": pose "+name);
+  if(source === "UI") persistUi();
+  emit();
+  return {ok:true};
+}
+
+function setMotors(on){
+  state.motors = !!on;
+  if(!state.motors) stopDemo();
+  log("motors "+(state.motors?"enabled":"disabled"));
+  emit();
+  return {ok:true};
+}
+function setEstop(on){
+  state.estop = !!on;
+  if(state.estop){ stopDemo(); state.motion = "stopped"; }
+  else state.motion = "idle";
+  log("E-STOP "+(state.estop?"ACTIVE":"released"));
+  emit();
+  return {ok:true};
+}
+function reset(){
+  stopDemo();
+  state.estop = false;
+  state.motors = true;
+  setTargets(poses.home, true);
+  Object.assign(state.joints, targets);
+  state.pose = "home";
+  state.motion = "idle";
+  worldX = 0;
+  floorScrollX = 0;
+  floorScrollZ = 0;
+  faceYaw = 0;
+  reverseStage = null;
+  pendingWalkDir = null;
+  gestureSteps = null;
+  kneelDrop = 0;
+  kneelDropTarget = 0;
+  gaitPhase = 0;
+  gaitBlend = 0;
+  waveBlend = 0;
+  log("simulator reset");
+  emit();
+}
+
+function normalizeWalkDir(dir){
+  const d = String(dir || "place").toLowerCase();
+  if(d === "left" || d === "east") return "left";
+  if(d === "right" || d === "west") return "right";
+  if(d === "back" || d === "backward" || d === "backwards" || d === "north") return "back";
+  if(d === "forward" || d === "south") return "south";
+  return "place";
+}
+function headingOf(dir){
+  const d = normalizeWalkDir(dir);
+  if(d === "left") return "east";
+  if(d === "right") return "west";
+  if(d === "back") return "north";
+  return "south";
+}
+function currentHeading(){
+  if(state.motion === "walking" || reverseStage){
+    return headingOf(pendingWalkDir || state.walkDir || "place");
+  }
+  return state.heading || "south";
+}
+function desiredFaceYaw(dir){
+  // Body frame, same as "raise your left hand". Facing you (camera on +Z) is
+  // south. Her left is +X / east / +π/2; her right is -X / west / -π/2;
+  // behind her is north (π).
+  const h = headingOf(dir);
+  if(h === "east") return Math.PI / 2;
+  if(h === "west") return -Math.PI / 2;
+  if(h === "north") return Math.PI;
+  return 0;
+}
+function yawDelta(from, to){
+  let d = to - from;
+  while(d > Math.PI) d -= Math.PI * 2;
+  while(d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+function syncWalkButtons(){
+  const intent = pendingWalkDir || ((state.motion === "walking" || reverseStage) ? state.walkDir : null);
+  const walking = state.motion === "walking" || !!reverseStage;
+  ["walkLeft","walkRight","walkPlace","walkBack","stopMotion"].forEach(id => {
+    const el = $(id);
+    if(!el) return;
+    if(state.locked && !state.estop && state.motors) el.disabled = false;
+  });
+  $("walkLeft")?.classList.toggle("on", walking && intent === "left");
+  $("walkRight")?.classList.toggle("on", walking && intent === "right");
+  $("walkPlace")?.classList.toggle("on", walking && (intent === "place" || intent === "south"));
+  $("walkBack")?.classList.toggle("on", walking && intent === "back");
+}
+function nearHeelStrike(phase){
+  const c = (((phase / (Math.PI * 2)) % 1) + 1) % 1;
+  return Math.min(c, Math.abs(c - 0.5), 1 - c) < 0.07;
+}
+function haltWalkKeepFacing(){
+  if(walkTimer){ clearInterval(walkTimer); walkTimer = null; }
+  if(state.motion === "walking") state.motion = "idle";
+  state.walkDir = "place";
+  state.heading = "south";
+}
+function requestWalk(dir){
+  reverseStage = "stopping";
+  reverseFromDir = state.walkDir || "place";
+  pendingWalkDir = dir;
+  stopClock = 0;
+  syncWalkButtons();
+  emit();
+}
+function stopWalkSmooth(){
+  if(state.motion !== "walking" && !reverseStage && gaitBlend < 0.08){
+    pendingWalkDir = null;
+    reverseStage = null;
+    emit();
+    return;
+  }
+  pendingWalkDir = null;
+  reverseStage = "stopping";
+  reverseFromDir = state.walkDir || "place";
+  stopClock = 0;
+  syncWalkButtons();
+  emit();
+}
+function beginWalk(dir){
+  reverseStage = null;
+  pendingWalkDir = null;
+  stopClock = 0;
+  turnClock = 0;
+  state.walkDir = dir;
+  if(state.motion !== "walking") gaitPhase = 0;
+  walkStarted = performance.now();
+  state.motion = "walking";
+  state.pose = "walk-cycle";
+  if(walkTimer){ clearInterval(walkTimer); walkTimer = null; }
+  walkTimer = 1;
+  state.heading = headingOf(dir);
+  log(dir === "place" ? "walk in place, facing south" : ("walk "+headingOf(dir)+" ("+dir+")"));
+  syncWalkButtons();
+  emit();
+}
+function startStepTurn(dir){
+  pendingWalkDir = dir;
+  reverseStage = "turning";
+  turnClock = 0;
+  turnFoot = 0;
+  syncWalkButtons();
+  emit();
+}
+function tickStepTurn(dt, pose){
+  const target = desiredFaceYaw(pendingWalkDir || "place");
+  const remain = yawDelta(faceYaw, target);
+  turnClock += dt;
+  const cyc = 0.64;
+  const t = turnClock % cyc;
+  let lift = 0;
+  let rotating = false;
+  if(t < 0.16){
+    lift = t / 0.16;
+  } else if(t < 0.44){
+    lift = 1;
+    rotating = true;
+  } else {
+    lift = Math.max(0, 1 - (t - 0.44) / 0.20);
+  }
+  if(rotating && Math.abs(remain) > 0.04){
+    const maxThis = (Math.PI / 2) * (dt / 0.28);
+    faceYaw += Math.sign(remain) * Math.min(Math.abs(remain), maxThis);
+  }
+  const side = turnFoot === 0 ? "left" : "right";
+  const planted = turnFoot === 0 ? "right" : "left";
+  pose[side+"_knee"] = Math.max(jv(pose, side+"_knee"), 8 + 30 * lift);
+  pose[side+"_hip"] = jv(pose, side+"_hip") + 8 * lift;
+  pose[side+"_ankle"] = jv(pose, side+"_ankle") + 6 * lift;
+  pose[planted+"_knee"] = Math.max(jv(pose, planted+"_knee"), 6);
+  if(Math.abs(yawDelta(faceYaw, target)) < 0.06 && lift < 0.22 && turnClock > 0.4){
+    beginWalk(pendingWalkDir || "place");
+    return;
+  }
+  if(t + dt >= cyc) turnFoot = turnFoot ? 0 : 1;
+}
+
+function startWalk(direction, skipPlant, source){
+  if(state.estop || !state.motors) return {ok:false, error: state.estop?"E-STOP is active":"Motors are disabled"};
+  ensureLocked(true);
+  syncLockUi();
+  const next = normalizeWalkDir(direction);
+  if(source === "hydrate" && isLocomoting()) return {ok:true};
+  if(state.motion !== "walking" && !reverseStage){
+    if(isKneeling() && source !== "hydrate"){
+      startGestureSteps("custom", [{offsets: plantedLegOffsets(), drop: 0}], {
+        onDone: () => startWalk(direction, skipPlant, source)
+      });
+      return {ok:true};
+    }
+    gestureTarget = emptyJoints();
+    kneelDropTarget = 0;
+    applyLockedTargets();
+  }
+  const intent = reverseStage ? pendingWalkDir : (state.motion === "walking" ? state.walkDir : null);
+  if(intent === next && (state.motion === "walking" || reverseStage === "turning")){
+    syncWalkButtons();
+    emit();
+    return {ok:true};
+  }
+  if(state.motion === "walking"){
+    if(next === state.walkDir){
+      syncWalkButtons();
+      emit();
+      return {ok:true};
+    }
+    requestWalk(next);
+    return {ok:true};
+  }
+  if(reverseStage === "stopping"){
+    pendingWalkDir = next;
+    syncWalkButtons();
+    emit();
+    return {ok:true};
+  }
+  if(reverseStage === "turning"){
+    pendingWalkDir = next;
+    syncWalkButtons();
+    emit();
+    return {ok:true};
+  }
+  if(!skipPlant && gaitBlend < 0.2){
+    const air = airborneSides(state.joints);
+    if(air.length){
+      if(state.motion === "waving" || state.motion === "demo"){
+        if(demoTimer){ clearInterval(demoTimer); demoTimer = null; }
+        state.motion = "idle";
+      }
+      setTargets(plantLegMap(Object.assign({}, targets), air));
+      pendingMove = {kind:"walk", dir: next};
+      emit();
+      return {ok:true};
+    }
+  }
+  if(Math.abs(yawDelta(faceYaw, desiredFaceYaw(next))) > 0.12){
+    startStepTurn(next);
+    return {ok:true};
+  }
+  beginWalk(next);
+  return {ok:true};
+}
+
+function startDemo(){
+  if(state.estop || !state.motors) return {ok:false, error: state.estop?"E-STOP is active":"Motors are disabled"};
+  ensureLocked(true);
+  stopDemo();
+  const sequence = ["attention","ready","wave","tpose","hands_up","bow","ground_support","neutral","home"];
+  let i = 0;
+  state.motion = "demo";
+  applyPose(sequence[i++], "demo");
+  state.motion = "demo";
+  demoTimer = setInterval(() => {
+    if(i >= sequence.length){ stopDemo(); state.motion = "idle"; log("pose demo complete"); emit(); return; }
+    applyPose(sequence[i++], "demo");
+    state.motion = "demo";
+  }, 2200);
+  return {ok:true};
+}
+
+const ARM_KIND_RECIPE = {
+  // Match Body Actions → Arms Forward / Arms Up exactly.
+  forward: {shoulder:78, shoulder_out:0, elbow:8, wrist:0},
+  raise: {shoulder:145, shoulder_out:0, elbow:20, wrist:0},
+  out: {shoulder:0, shoulder_out:90, elbow:0, wrist:0},
+  lower: {shoulder:0, shoulder_out:0, elbow:5, wrist:0}
+};
+function armSidesInMap(map){
+  const sides = [];
+  if(!map) return sides;
+  if(["left_shoulder","left_shoulder_out","left_elbow"].some(k => map[k] != null)) sides.push("left");
+  if(["right_shoulder","right_shoulder_out","right_elbow"].some(k => map[k] != null)) sides.push("right");
+  return sides;
+}
+function applyArmKindRecipe(map, kind, sideHint){
+  const rec = ARM_KIND_RECIPE[kind];
+  if(!rec || !map) return map;
+  let sides = sideHint === "both" ? ["left","right"] : (sideHint === "left" || sideHint === "right" ? [sideHint] : armSidesInMap(map));
+  if(!sides.length) sides = ["right"];
+  sides.forEach(side => {
+    map[side+"_shoulder"] = rec.shoulder;
+    map[side+"_shoulder_out"] = rec.shoulder_out;
+    map[side+"_elbow"] = rec.elbow;
+    map[side+"_wrist"] = rec.wrist;
+  });
+  return map;
+}
+function sameGoal(map){
+  if(!map) return true;
+  return Object.keys(map).every(k => {
+    const v = clampJoint(k, map[k]);
+    if(v == null) return true;
+    return Math.abs((targets[k] != null ? targets[k] : state.joints[k]) - v) < 0.6;
+  });
+}
+function applyJointMap(map, source){
+  if(!map || typeof map !== "object") return 0;
+  const src = source || "agent";
+  if((src === "hydrate" || src === "status") && sameGoal(map)) return 0;
+  const n = Object.keys(map).filter(k => defs[k]).length;
+  setTargets(map, n >= 12);
+  if(src !== "walk" && src !== "demo" && !isLocomoting() && state.motion !== "waving") state.motion = "idle";
+  emit();
+  return Object.keys(map).length;
+}
+
+function ensureLocked(silent){
+  if(userCalibrating && silent) return;
+  if(state.locked) return;
+  userCalibrating = false;
+  state.locked = true;
+  lockedPose = completeJoints(state.joints);
+  copyArmJoints(lockedPose, state.joints);
+  if(!silent) log("pose locked");
+  syncLockUi();
+}
+
+function unlockPose(){
+  stopDemo();
+  pendingMove = null;
+  gestureSteps = null;
+  kneelDrop = 0;
+  kneelDropTarget = 0;
+  waving = false;
+  waveBlend = 0;
+  gaitBlend = 0;
+  gestureTarget = emptyJoints();
+  gestureCurrent = emptyJoints();
+  applyLockedTargets();
+  Object.assign(state.joints, targets);
+  liveJoints = Object.assign({}, targets);
+  userCalibrating = true;
+  state.locked = false;
+  state.motion = "idle";
+  markUiEdit();
+  log("pose unlocked — calibrating until you press Lock Pose");
+  syncLockUi();
+  persistUi();
+  emit();
+  setTab("Setup");
+}
+
+function command(msg){
+  msg = msg || {};
+  const cmd = String(msg.cmd || msg.command || "status").toLowerCase();
+  const src = msg.source || ((cmd === "status" || cmd === "state") ? "hydrate" : "agent");
+  const hydrate = src === "hydrate" || src === "status";
+  const seq = Number(msg.seq);
+  const incomingWave = String(msg.pose||"") === "wave" || msg.motion === "waving";
+  const isStatus = cmd === "status" || cmd === "state";
+  // teela_v2: setGesture sets waving=false. Status polls and persist echoes must not restart it.
+  // Chat "wave" is cmd=pose from grok-desk — that is a real request, not an echo.
+  const freshAgentWave = incomingWave && (src === "grok-desk" || src === "agent") && cmd === "pose" && String(msg.motion||"waving") !== "idle";
+  if(incomingWave && src !== "UI" && src !== "demo" && !freshAgentWave){
+    if(hydrate || isStatus){
+      return {ok:true, ignored:"stale-wave", status:status()};
+    }
+    if(!waveIntent && (state.pose !== "wave" || !waving) && (uiHeld() || cmd !== "pose")){
+      return {ok:true, ignored:"stale-wave", status:status()};
+    }
+    if(!waveIntent && !waving && state.pose === "wave"){
+      return {ok:true, ignored:"stale-wave", status:status()};
+    }
+  }
+  if(uiHeld() && src !== "UI" && hydrate) return {ok:true, ignored:"ui", status:status()};
+  if((userCalibrating || !state.locked) && hydrate && cmd !== "status" && cmd !== "state"){
+    return {ok:true, ignored:"unlocked", status:status()};
+  }
+  if(hydrate && (animating || isLocomoting() || state.motion === "waving" || gestureSteps)){
+    return {ok:true, ignored:"busy", status:status()};
+  }
+  if(hydrate && Number.isFinite(seq) && seq <= appliedSeq) return {ok:true, ignored:"stale", status:status()};
+  if(Number.isFinite(seq) && seq >= 0) appliedSeq = Math.max(appliedSeq, seq);
+
+  if(src !== "UI" && src !== "hydrate" && src !== "status" && cmd !== "status" && cmd !== "state"){
+    ensureLocked(true);
+  }
+
+  if(cmd === "status" || cmd === "state"){
+    if(msg.joints && typeof msg.joints === "object"){
+      if(hydrate && (state.motion === "walking" || state.motion === "demo")) return {ok:true, status:status()};
+      applyJointMap(msg.joints, src);
+      if(msg.pose) state.pose = String(msg.pose);
+    }
+    return {ok:true, status:status()};
+  }
+  if(cmd === "nudge"){
+    const name = canonicalJoint(msg.joint || msg.name);
+    const res = nudgeJoint(name, msg.dir || msg.direction || msg.delta, src, msg.delta);
+    return Object.assign(res, {status:status()});
+  }
+  if(cmd === "joint" || cmd === "joints" || cmd === "set_joint"){
+    const map = Object.assign({}, msg.joints && typeof msg.joints === "object" ? msg.joints : {});
+    if(msg.joint && msg.value == null && msg.degrees == null && (msg.dir || msg.direction || msg.delta != null)){
+      const res = nudgeJoint(canonicalJoint(msg.joint), msg.dir || msg.direction || msg.delta, src, msg.delta);
+      return Object.assign(res, {status:status()});
+    }
+    if(msg.joint && (msg.value != null || msg.degrees != null)) map[msg.joint] = msg.value != null ? msg.value : msg.degrees;
+    const armKind = String(msg.arm_kind || "").toLowerCase();
+    if(ARM_KIND_RECIPE[armKind]) applyArmKindRecipe(map, armKind, msg.arm_side);
+    if(!Object.keys(map).length) return {ok:false, error:"joint and value required", status:status()};
+    const holdSide = waveHoldSide(map);
+    if(holdSide && !hydrate){
+      const started = startWave(holdSide, src === "UI" ? "UI" : "qwen");
+      if(started && started.ok === false) return Object.assign(started, {status:status()});
+      return {ok:true, status:status(), waving:true, side:holdSide};
+    }
+    if(state.estop) return {ok:false, error:"E-STOP is active", status:status()};
+    if(!state.motors) return {ok:false, error:"Motors are disabled", status:status()};
+    if(hydrate && sameGoal(map)){
+      if(msg.pose) state.pose = String(msg.pose);
+      return {ok:true, status:status()};
+    }
+    if(hydrate && isLocomoting()) return {ok:true, ignored:"busy", status:status()};
+    stopDemo();
+    if(msg.pose) state.pose = String(msg.pose);
+    else state.pose = "custom";
+    if(!hydrate && waveIntent && (String(msg.pose||"") === "wave" || msg.motion === "waving")){
+      const wrist = (waveSide === "left" ? "left" : "right") + "_wrist";
+      map[wrist] = 0;
+      state.pose = "wave";
+      waving = msg.motion !== "idle";
+      state.motion = waving ? "waving" : "idle";
+      if(waving) waveStarted = performance.now();
+      else { stopWaving(); }
+    } else if(String(msg.pose||"") === "wave" || msg.motion === "waving"){
+      /* user already left the wave; do not restart it from a pull or echo */
+      if(msg.motion === "idle" || String(msg.pose||"") !== "wave") stopWaving();
+    } else {
+      stopWaving();
+    }
+    applyJointMap(map, src);
+    return {ok:true, status:status()};
+  }
+  if(cmd === "pose"){
+    const name = String(msg.pose || msg.name || "");
+    if(poses[name]) return Object.assign(applyPose(name, src, msg.joints, msg.motion), {status:status()});
+    if(msg.joints && typeof msg.joints === "object"){
+      stopDemo();
+      state.pose = name || "custom";
+      applyJointMap(msg.joints, src);
+      return {ok:true, status:status()};
+    }
+    return {ok:false, error:"Unknown pose: "+name, status:status()};
+  }
+  if(cmd === "walk" || cmd === "start_walk") return Object.assign(startWalk(msg.direction || msg.dir, false, src), {status:status()});
+  if(cmd === "walk_left" || cmd === "walk_east") return Object.assign(startWalk("left", false, src), {status:status()});
+  if(cmd === "walk_right" || cmd === "walk_west") return Object.assign(startWalk("right", false, src), {status:status()});
+  if(cmd === "walk_place" || cmd === "walk_south") return Object.assign(startWalk("place", false, src), {status:status()});
+  if(cmd === "walk_back" || cmd === "walk_north") return Object.assign(startWalk("back", false, src), {status:status()});
+  if(cmd === "demo") return Object.assign(startDemo(), {status:status()});
+  if(cmd === "stop" || cmd === "stop_demo" || cmd === "neutral"){
+    if(isLocomoting() || state.motion === "walking"){
+      stopWaving();
+      stopWalkSmooth();
+      return {ok:true, status:status()};
+    }
+    return Object.assign(returnNeutral(), {status:status()});
+  }
+  if(cmd === "reset"){ reset(); if(src !== "UI") ensureLocked(true); return {ok:true, status:status()}; }
+  if(cmd === "lock" || cmd === "lock_pose"){ ensureLocked(false); emit(); return {ok:true, status:status()}; }
+  if(cmd === "unlock" || cmd === "unlock_pose"){ unlockPose(); return {ok:true, status:status()}; }
+  if(cmd === "estop" || cmd === "estop_on" || cmd === "estop_off"){
+    const on = cmd === "estop_on" || (cmd === "estop" && String(msg.value||msg.estop||"on").toLowerCase() !== "off");
+    if(cmd === "estop_off") return Object.assign(setEstop(false), {status:status()});
+    return Object.assign(setEstop(on), {status:status()});
+  }
+  if(cmd === "motors" || cmd === "motors_on" || cmd === "motors_off"){
+    const on = cmd === "motors_on" || (cmd === "motors" && String(msg.value||msg.motors||"on").toLowerCase() !== "off");
+    if(cmd === "motors_off") return Object.assign(setMotors(false), {status:status()});
+    return Object.assign(setMotors(on), {status:status()});
+  }
+  if(cmd === "head"){
+    const dir = String(msg.dir || msg.direction || "").toLowerCase();
+    if(dir === "left") setJoint("neck_pan", -40, src);
+    else if(dir === "right") setJoint("neck_pan", 40, src);
+    else if(dir === "center") setJoint("neck_pan", 0, src);
+    else if(dir === "up") setJoint("neck_tilt", 20, src);
+    else if(dir === "down") setJoint("neck_tilt", -18, src);
+    else if(dir === "level") setJoint("neck_tilt", 0, src);
+    return {ok:true, status:status()};
+  }
+  return {ok:false, error:"Unknown robot command: "+cmd, status:status()};
+}
+
+const RobotSim = {
+  defs, poses, aliases, state,
+  setJoint, nudgeJoint, applyPose, setMotors, setEstop, reset, startDemo, startWalk, stopDemo,
+  subscribe(fn){ listeners.add(fn); fn(snapshot()); return () => listeners.delete(fn); },
+  status, jointList(){ return Object.keys(defs); }, command, applyJointMap,
+  busy(){ return !!(animating || isLocomoting() || waving || state.motion === "waving" || gestureSteps); },
+  uiHeld, ensureLocked, unlockPose
+};
+window.RobotSim = RobotSim;
+
+const teelaBodyState = {
+  mode: "virtual",
+  get locked(){ return !!state.locked; },
+  action: { id: null, skill: "idle", status: "completed" },
+  get joints(){ return liveJoints || state.joints; }
+};
+window.teelaBodyState = teelaBodyState;
+
+class VirtualBodyController {
+  getState(){
+    const j = Object.assign({}, liveJoints || state.joints);
+    return {
+      mode: "virtual",
+      locked: !!state.locked,
+      estop: !!state.estop,
+      motors: !!state.motors,
+      pose: state.pose,
+      motion: state.motion,
+      waving: !!waving,
+      action: Object.assign({}, teelaBodyState.action),
+      joints: j,
+      head_pan: j.neck_pan,
+      head_tilt: j.neck_tilt
+    };
+  }
+  _writeSlider(name, value){
+    const row = SLIDERS.find(s => s[1] === name);
+    if(!row) return;
+    const el = $(row[0]);
+    if(!el) return;
+    el.value = String(row[2] ? uiElbow(value) : Math.round(value));
+    const out = $(row[0]+"O");
+    if(out) out.textContent = Math.round(row[2] ? uiElbow(value) : value)+"°";
+  }
+  setJoint(name, angle, options){
+    options = options || {};
+    name = canonicalJoint(name);
+    if(!defs[name]) return {status:"rejected", reason:"unknown_joint"};
+    if(state.estop) return {status:"rejected", reason:"estop"};
+    if(!state.motors) return {status:"rejected", reason:"motors_off"};
+    const src = options.source || "qwen";
+    const v = clampJoint(name, angle);
+    if(v == null) return {status:"rejected", reason:"invalid_angle"};
+    if(state.locked){
+      lockedPose[name] = v;
+      gestureTarget[name] = 0;
+      applyLockedTargets();
+    } else {
+      if(!options.fromSlider) this._writeSlider(name, v);
+      setJoint(name, v, src);
+      state.joints[name] = v;
+      if(liveJoints) liveJoints[name] = v;
+    }
+    if(!options.fromSlider) this._writeSlider(name, v);
+    return {status:"completed", joint:name, value:v};
+  }
+  setPose(joints, options){
+    options = options || {};
+    const duration = Math.max(0, Number(options.duration_ms) || 0);
+    const src = Object.assign({}, liveJoints || state.joints);
+    const dest = {};
+    Object.keys(joints || {}).forEach(k => {
+      const v = clampJoint(k, joints[k]);
+      if(v != null) dest[canonicalJoint(k)] = v;
+    });
+    if(!Object.keys(dest).length) return {status:"rejected", reason:"empty_pose"};
+    teelaBodyState.action = {id: options.action_id || null, skill: options.skill || "setPose", status: "executing"};
+    const applyNow = () => {
+      Object.keys(dest).forEach(k => this.setJoint(k, dest[k], options));
+    };
+    if(duration < 40){
+      applyNow();
+      teelaBodyState.action.status = "completed";
+      return {status:"completed"};
+    }
+    const t0 = performance.now();
+    const step = (now) => {
+      const u = Math.min(1, (now - t0) / duration);
+      const e = 1 - Math.pow(1 - u, 3);
+      Object.keys(dest).forEach(k => {
+        const a = Number(src[k]||0), b = dest[k];
+        this.setJoint(k, a + (b - a) * e, {source: options.source || "qwen"});
+      });
+      if(u < 1) requestAnimationFrame(step);
+      else teelaBodyState.action.status = "completed";
+    };
+    requestAnimationFrame(step);
+    return {status:"executing", duration_ms: duration};
+  }
+  executeSkill(skill, parameters){
+    parameters = parameters || {};
+    skill = String(skill||"").toLowerCase();
+    if(state.estop) return {status:"rejected", reason:"estop"};
+    if(!state.motors) return {status:"rejected", reason:"motors_off"};
+    teelaBodyState.action = {id: parameters.action_id || null, skill, status: "executing"};
+    if(skill === "orient_head"){
+      const joints = {};
+      if(parameters.pan_deg != null) joints.neck_pan = Number(parameters.pan_deg);
+      if(parameters.tilt_deg != null) joints.neck_tilt = Number(parameters.tilt_deg);
+      return this.setPose(joints, {duration_ms: Number(parameters.duration_ms)||800, action_id: parameters.action_id, skill, source:"qwen"});
+    }
+    if(skill === "raise_arm"){
+      const side = String(parameters.side||"right").toLowerCase() === "left" ? "left" : "right";
+      const other = side === "left" ? "right" : "left";
+      ensureLocked(true);
+      stopWaving();
+      const joints = {};
+      const deg = Number(parameters.degrees);
+      joints[side+"_shoulder"] = (deg === deg && deg > 0) ? deg : 142;
+      joints[side+"_elbow"] = 18;
+      joints[other+"_shoulder"] = 0;
+      joints[other+"_shoulder_out"] = 0;
+      joints[other+"_elbow"] = 5;
+      return this.setPose(joints, {duration_ms: 700, action_id: parameters.action_id, skill, source:"qwen"});
+    }
+    if(skill === "lower_arm"){
+      const side = String(parameters.side||"right").toLowerCase() === "left" ? "left" : "right";
+      ensureLocked(true);
+      const joints = {};
+      joints[side+"_shoulder"] = 0;
+      joints[side+"_shoulder_out"] = 0;
+      joints[side+"_elbow"] = 5;
+      return this.setPose(joints, {duration_ms: 700, action_id: parameters.action_id, skill, source:"qwen"});
+    }
+    if(skill === "wave"){
+      const side = String(parameters.side||"right").toLowerCase() === "left" ? "left" : "right";
+      const started = startWave(side, "qwen");
+      if(started && started.ok === false){
+        teelaBodyState.action.status = "rejected";
+        return {status:"rejected", skill:"wave", reason: started.error || "wave_failed"};
+      }
+      return {status:"executing", skill:"wave", duration_ms: 2900, waving: true, side};
+    }
+    if(skill === "neutral_pose"){
+      if(state.locked) returnNeutral();
+      else {
+        applySetupPreset("human_neutral");
+        persistUi();
+      }
+      return {status:"completed", skill:"neutral_pose"};
+    }
+    if(skill === "stop"){
+      stopWaving();
+      if(state.locked){
+        lockedPose = completeJoints(poses.home);
+        returnNeutral();
+      }
+      else { stopDemo(); state.motion = "idle"; persistUi(); emit(); }
+      return {status:"completed", skill:"stop", duration_ms: 200};
+    }
+    if(skill === "gesture" || ["greeting","agree","disagree","confused","thinking","excited","point","shrug","listen"].indexOf(skill) >= 0){
+      return this.playGesture(parameters.gesture || skill, parameters);
+    }
+    teelaBodyState.action.status = "rejected";
+    return {status:"rejected", reason:"unknown_skill"};
+  }
+  _sequence(frames, options){
+    options = options || {};
+    let i = 0;
+    const run = () => {
+      if(i >= frames.length){
+        teelaBodyState.action.status = "completed";
+        return;
+      }
+      const frame = frames[i++];
+      const joints = frame.joints || frame[0];
+      const ms = Number(frame.duration_ms != null ? frame.duration_ms : frame[1]) || 400;
+      this.setPose(joints, {duration_ms: ms, source: "qwen", skill: options.skill, action_id: options.action_id});
+      setTimeout(run, ms);
+    };
+    run();
+    const total = frames.reduce((n, f) => n + (Number(f.duration_ms != null ? f.duration_ms : f[1]) || 400), 0);
+    return {status:"executing", duration_ms: total};
+  }
+  playGesture(name, parameters){
+    parameters = parameters || {};
+    name = String(name||"").toLowerCase();
+    const side = String(parameters.side||"right").toLowerCase() === "left" ? "left" : "right";
+    teelaBodyState.action = {id: parameters.action_id || null, skill: name, status: "executing"};
+    if(name === "greeting"){
+      const started = startWave(side, "qwen");
+      if(started && started.ok === false){
+        teelaBodyState.action.status = "rejected";
+        return {status:"rejected", skill:"greeting", reason: started.error || "wave_failed"};
+      }
+      return {status:"executing", skill:"greeting", duration_ms: 2900, waving: true, side};
+    }
+    if(name === "agree"){
+      return this._sequence([
+        {joints:{neck_tilt:14}, duration_ms:260},
+        {joints:{neck_tilt:-6}, duration_ms:260},
+        {joints:{neck_tilt:8}, duration_ms:220},
+        {joints:{neck_tilt:0}, duration_ms:260}
+      ], parameters);
+    }
+    if(name === "disagree"){
+      return this._sequence([
+        {joints:{neck_pan:-16}, duration_ms:220},
+        {joints:{neck_pan:16}, duration_ms:280},
+        {joints:{neck_pan:-12}, duration_ms:240},
+        {joints:{neck_pan:0}, duration_ms:240}
+      ], parameters);
+    }
+    if(name === "confused"){
+      const joints = {neck_tilt:14, lower_back_roll:8};
+      joints.left_shoulder_out = 42; joints.right_shoulder_out = 42;
+      joints.left_elbow = 45; joints.right_elbow = 45;
+      joints.left_wrist = 18; joints.right_wrist = 18;
+      return this.setPose(joints, {duration_ms: 700, source:"qwen", skill:"confused", action_id: parameters.action_id});
+    }
+    if(name === "thinking"){
+      const joints = {neck_tilt:10, neck_pan: side === "left" ? -12 : 12};
+      joints[side+"_shoulder"] = 48;
+      joints[side+"_elbow"] = 95;
+      joints[side+"_wrist"] = 10;
+      return this.setPose(joints, {duration_ms: 800, source:"qwen", skill:"thinking", action_id: parameters.action_id});
+    }
+    if(name === "excited"){
+      return this.setPose({
+        left_shoulder:142, right_shoulder:142,
+        left_elbow:18, right_elbow:18
+      }, {duration_ms: 700, source:"qwen", skill:"excited", action_id: parameters.action_id});
+    }
+    if(name === "point"){
+      const joints = {};
+      joints[side+"_shoulder"] = 78;
+      joints[side+"_shoulder_out"] = 0;
+      joints[side+"_elbow"] = 8;
+      joints[side+"_wrist"] = 0;
+      joints.neck_pan = side === "left" ? -18 : 18;
+      return this.setPose(joints, {duration_ms: 700, source:"qwen", skill:"point", action_id: parameters.action_id});
+    }
+    if(name === "shrug"){
+      return this.setPose({
+        left_shoulder_out:48, right_shoulder_out:48,
+        left_elbow:32, right_elbow:32,
+        neck_tilt:6
+      }, {duration_ms: 550, source:"qwen", skill:"shrug", action_id: parameters.action_id});
+    }
+    if(name === "listen"){
+      return this.setPose({neck_tilt:8, neck_pan:0}, {duration_ms: 500, source:"qwen", skill:"listen", action_id: parameters.action_id});
+    }
+    return {status:"rejected", reason:"unknown_gesture"};
+  }
+  stop(){ return this.executeSkill("stop"); }
+  lock(){ ensureLocked(false); emit(); return {status:"completed"}; }
+  unlock(){ unlockPose(); return {status:"completed"}; }
+}
+const virtualBody = new VirtualBodyController();
+window.VirtualBodyController = VirtualBodyController;
+window.virtualBody = virtualBody;
+
+function reportVirtualResult(actionId, skill, started){
+  const wait = Math.max(120, Number(started && started.duration_ms) || (
+    (skill === "wave" || skill === "greeting") ? 2900
+    : (skill === "orient_head" || skill === "raise_arm" || skill === "lower_arm" || skill === "gesture") ? 850
+    : 200
+  ));
+  setTimeout(() => {
+    teelaBodyState.action = {id: actionId, skill, status: "completed"};
+    const st = virtualBody.getState();
+    try{
+      window.parent.postMessage({
+        type: "action_result",
+        action_id: actionId,
+        status: "completed",
+        skill,
+        body_state: st,
+        mode: "virtual"
+      }, "*");
+    }catch(_){}
+    emitVirtualBodyState(true);
+  }, wait);
+}
+
+window.addEventListener("message", (e) => {
+  const data = e.data || {};
+  if(data && data.type === "mic-analyzer"){
+    applyMicAnalyzer(data);
+    return;
+  }
+  if(data && data.type === "mic-settings"){
+    applyMicSettingsUi(data);
+    return;
+  }
+  if(data && data.type === "catrina-mesh" && data.buf){
+    ingestCatrina(data.buf);
+    return;
+  }
+  if(data && data.type === "robot-live-nack"){
+    lastLiveJson = "";
+    lastLiveSent = 0;
+    return;
+  }
+  if(data && (data.type === "virtual-body-action" || data.type === "body_action")){
+    const skill = String(data.skill || "");
+    const params = Object.assign({}, data.parameters || data);
+    params.action_id = data.action_id;
+    const started = virtualBody.executeSkill(skill, params);
+    if(started.status === "rejected"){
+      try{
+        window.parent.postMessage({
+          type: "action_result",
+          action_id: data.action_id,
+          status: "rejected",
+          reason: started.reason,
+          skill,
+          body_state: virtualBody.getState(),
+          mode: "virtual"
+        }, "*");
+      }catch(_){}
+      return;
+    }
+    reportVirtualResult(data.action_id, skill, started);
+    return;
+  }
+  const isCmd = data && (data.type === "robot-command" || (data.type === "desktop.action" && data.action === "robot"));
+  if(!isCmd) return;
+  const result = RobotSim.command(data);
+  try{
+    (e.source || window.parent).postMessage({
+      type: "robot-status",
+      ok: !!result.ok,
+      error: result.error || null,
+      status: result.status || RobotSim.status(),
+      cmd: data.cmd || "status"
+    }, "*");
+  }catch(_){}
+});
+
+/* ---------- UI ---------- */
+function $(id){ return document.getElementById(id); }
+function setTab(name){
+  ["Setup","Actions","Walk"].forEach(n => {
+    const btn = $("tab"+n+"Btn") || $(n === "Setup" ? "tabSetupBtn" : n === "Actions" ? "tabActionBtn" : "tabWalkBtn");
+    const pane = $("tab"+n);
+    if(btn) btn.classList.toggle("active", (n==="Setup"?"Setup":n==="Actions"?"Actions":"Walk") === name);
+    if(pane) pane.classList.toggle("active", (n==="Setup"?"Setup":n==="Actions"?"Actions":"Walk") === name);
+  });
+  $("tabSetupBtn")?.classList.toggle("active", name === "Setup");
+  $("tabActionBtn")?.classList.toggle("active", name === "Actions");
+  $("tabWalkBtn")?.classList.toggle("active", name === "Walk");
+  $("tabSetup")?.classList.toggle("active", name === "Setup");
+  $("tabActions")?.classList.toggle("active", name === "Actions");
+  $("tabWalk")?.classList.toggle("active", name === "Walk");
+}
+
+function sliderValue(id, joint, isElbow){
+  const el = $(id);
+  if(!el) return;
+  const v = Number(el.value);
+  return isElbow ? fromUiElbow(v) : clampJoint(joint, v);
+}
+function writeSlider(id, joint, isElbow){
+  const el = $(id);
+  const out = $(id+"O");
+  if(!el) return;
+  const src = state.locked ? lockedPose : state.joints;
+  const v = src[joint] || 0;
+  if(document.activeElement !== el){
+    el.value = String(isElbow ? uiElbow(v) : Math.round(v));
+  }
+  if(out){
+    if(id === "speed") out.textContent = Number($("speed").value).toFixed(2)+"×";
+    else if(id === "stride" || id === "armSwing" || id === "sway") out.textContent = Math.round(Number($(id).value))+"%";
+    else out.textContent = Math.round(isElbow ? uiElbow(v) : v)+"°";
+  }
+}
+
+function syncSliders(){
+  SLIDERS.forEach(([id, joint, isElbow]) => writeSlider(id, joint, isElbow));
+  if($("speedO") && $("speed")) $("speedO").textContent = Number($("speed").value).toFixed(2)+"×";
+  if($("strideO") && $("stride")) $("strideO").textContent = Math.round(Number($("stride").value))+"%";
+  if($("armSwingO") && $("armSwing")) $("armSwingO").textContent = Math.round(Number($("armSwing").value))+"%";
+  if($("swayO") && $("sway")) $("swayO").textContent = Math.round(Number($("sway").value))+"%";
+}
+
+function syncLockUi(){
+  const locked = !!state.locked;
+  const pill = $("poseState");
+  if(pill){
+    pill.textContent = locked ? "LOCKED" : "CALIBRATION / UNLOCKED";
+    pill.classList.toggle("locked", locked);
+  }
+  if($("lockPose")) $("lockPose").disabled = locked;
+  if($("unlockPose")) $("unlockPose").disabled = !locked;
+  if($("resetPose")) $("resetPose").disabled = locked;
+  document.querySelectorAll(".cal").forEach(el => { el.disabled = locked; });
+  document.querySelectorAll(".setupPreset").forEach(el => { el.disabled = locked; });
+  document.querySelectorAll(".motionCtl").forEach(el => {
+    if(el.id === "neutralAction") el.disabled = !!(state.estop || !state.motors);
+    else el.disabled = !locked || state.estop || !state.motors;
+  });
+  ["speed","stride","armSwing","sway"].forEach(id => { if($(id)) $(id).disabled = !locked; });
+  syncWalkButtons();
+  if($("lockMsg")){
+    $("lockMsg").innerHTML = locked
+      ? "Pose is locked. Walking, actions, and the MiniOS bot can move the body. Press <strong>Unlock</strong> to calibrate again."
+      : "Unlocked for calibration. Setup sliders are live. Press <strong>Lock Pose</strong> when you want walking and the bot to move again.";
+  }
+  if($("setupState")) $("setupState").textContent = locked ? "LOCKED" : "UNLOCKED";
+}
+
+function syncHud(){
+  const hud = $("hud");
+  if(hud){
+    const facing = currentHeading();
+    hud.textContent = "MODEL: TEELA 3D TWIN\nMODE: "+(state.locked?"LOCKED":"CALIBRATION")+"\nMOTION: "+(state.locked?(state.motion||"idle").toUpperCase():"LOCKED OUT")+"\nFACING: "+facing.toUpperCase();
+  }
+  if($("motionState")) $("motionState").textContent = state.locked ? (state.motion||"idle").toUpperCase() : "DISABLED";
+  if($("facingState")) $("facingState").textContent = currentHeading();
+  if($("direction")){
+    const intent = pendingWalkDir || ((state.motion==="walking" || reverseStage) ? state.walkDir : null);
+    $("direction").textContent = intent ? headingOf(intent)+(reverseStage ? " · turn" : "") : "—";
+  }
+  const needle = $("compassNeedle");
+  if(needle){
+    const deg = {north:0, east:90, south:180, west:270}[currentHeading()] || 180;
+    needle.style.transform = "rotate("+deg+"deg)";
+  }
+  document.querySelectorAll("#compass [data-heading]").forEach(el => {
+    el.classList.toggle("on", el.getAttribute("data-heading") === currentHeading());
+  });
+  syncWalkButtons();
+  if($("phase")) $("phase").textContent = Math.round((gaitPhase%(Math.PI*2))*180/Math.PI)+"°";
+  const live = liveJoints || state.joints;
+  if($("liveLowerBack")) $("liveLowerBack").textContent = Math.round(live.lower_back_pitch||0)+"°";
+  if($("liveBack")) $("liveBack").textContent = Math.round(live.upper_back_pitch||0)+"°";
+  if($("livePan")) $("livePan").textContent = Math.round(live.neck_pan||0)+"°";
+  if($("liveTilt")) $("liveTilt").textContent = Math.round(live.neck_tilt||0)+"°";
+  Object.keys(PART_META).forEach(name => {
+    const out = $("part-"+name);
+    if(out) out.textContent = Math.round(jointGoal(name))+"°";
+  });
+}
+
+function readCalibrationFromUi(){
+  const j = Object.assign({}, state.joints);
+  SLIDERS.forEach(([id, joint, isElbow]) => {
+    const el = $(id);
+    if(!el) return;
+    const v = isElbow ? fromUiElbow(el.value) : clampJoint(joint, el.value);
+    if(v != null) j[joint] = v;
+  });
+  return j;
+}
+
+function applyCalibrationSliders(source){
+  if(state.locked) return;
+  SLIDERS.forEach(([id, joint, isElbow]) => {
+    const el = $(id);
+    if(!el) return;
+    const v = isElbow ? fromUiElbow(el.value) : clampJoint(joint, el.value);
+    if(v == null) return;
+    if(window.virtualBody) virtualBody.setJoint(joint, v, {source:"UI", fromSlider:true});
+    else {
+      state.joints[joint] = v;
+      setTargets({[joint]: v});
+    }
+  });
+  liveJoints = Object.assign({}, state.joints);
+  state.pose = "custom";
+  markUiEdit();
+  persistUiSoon();
+  emitVirtualBodyState(false);
+}
+
+function lockedWith(delta, absolute){
+  const overlay = completeJoints(lockedPose);
+  if(delta){
+    Object.keys(delta).forEach(k => {
+      overlay[k] = (overlay[k]||0) + delta[k];
+    });
+  }
+  if(absolute) Object.assign(overlay, absolute);
+  return overlay;
+}
+
+function isLegAirborne(j, side){
+  const hip = j[side+"_hip"]||0;
+  const knee = j[side+"_knee"]||0;
+  return hip > 22 || (hip > 8 && knee > 42);
+}
+function airborneSides(j){
+  j = j || liveJoints || state.joints;
+  return ["left","right"].filter(side => isLegAirborne(j, side));
+}
+function plantLegMap(base, sides){
+  const out = Object.assign({}, base);
+  const src = lockedPose || poses.home;
+  (sides || ["left","right"]).forEach(side => {
+    out[side+"_hip"] = src[side+"_hip"]||0;
+    out[side+"_knee"] = src[side+"_knee"]||0;
+    out[side+"_ankle"] = src[side+"_ankle"]||0;
+    out[side+"_hip_out"] = src[side+"_hip_out"]||0;
+  });
+  return out;
+}
+function needsPlantBefore(nextMap){
+  const air = airborneSides();
+  if(!air.length) return false;
+  const nextAir = airborneSides(nextMap);
+  if(nextAir.some(side => air.indexOf(side) < 0)) return true;
+  if(air.some(side => nextAir.indexOf(side) < 0)) return true;
+  return false;
+}
+function legsNearTargets(tol){
+  tol = tol == null ? 2.4 : tol;
+  return LEG_JOINTS.every(k => Math.abs((state.joints[k]||0) - (targets[k]||0)) < tol);
+}
+function commitPendingMove(){
+  const move = pendingMove;
+  pendingMove = null;
+  if(!move) return;
+  if(move.kind === "walk") startWalk(move.dir, true);
+  else {
+    setTargets(move.map);
+    if(move.pose) state.pose = move.pose;
+    emit();
+    persistUi();
+  }
+}
+function applyLegSafe(map, poseName){
+  if(state.motion === "walking" || state.motion === "demo"){
+    if(walkTimer){ clearInterval(walkTimer); walkTimer = null; }
+    if(demoTimer){ clearInterval(demoTimer); demoTimer = null; }
+    state.motion = "idle";
+  }
+  const next = completeJoints(Object.assign({}, lockedPose, map));
+  const air = airborneSides();
+  if(air.length && needsPlantBefore(next)){
+    setTargets(plantLegMap(Object.assign({}, targets), air), true);
+    pendingMove = {kind:"pose", map:next, pose:poseName};
+    state.pose = poseName;
+    emit();
+    persistUi();
+    return;
+  }
+  pendingMove = null;
+  setTargets(next, true);
+  state.pose = poseName;
+  emit();
+  persistUi();
+}
+
+function plantedLegOffsets(){
+  return {
+    left_hip:0, left_hip_out:0, left_knee:0, left_ankle:0,
+    right_hip:0, right_hip_out:0, right_knee:0, right_ankle:0
+  };
+}
+function stanceNeedsPlant(stance, moving){
+  const j = liveJoints || state.joints;
+  return Math.abs(j[stance+"_hip_out"]||0) > 2
+    || isLegAirborne(j, stance)
+    || isLegAirborne(j, moving);
+}
+function gesturesNearTargets(keys, tol){
+  tol = tol == null ? 1.6 : tol;
+  keys = keys || LEG_JOINTS;
+  return keys.every(k => Math.abs((gestureCurrent[k]||0) - (gestureTarget[k]||0)) < tol);
+}
+function kneelingKneeSide(){
+  const j = liveJoints || state.joints;
+  const lDown = (j.left_knee||0) > 80 && (j.left_hip||0) < 20;
+  const rDown = (j.right_knee||0) > 80 && (j.right_hip||0) < 20;
+  if(lDown && rDown) return "both";
+  if(lDown && !rDown) return "left";
+  if(rDown && !lDown) return "right";
+  const pose = String(state.pose||"");
+  if(pose === "kneel_both") return "both";
+  if(pose === "kneel_left") return "left";
+  if(pose === "kneel_right") return "right";
+  if(kneelDrop > 0.05){
+    if((j.left_knee||0) >= (j.right_knee||0)) return "left";
+    return "right";
+  }
+  return null;
+}
+function isKneeling(){
+  return !!(kneelingKneeSide() || kneelDrop > 0.05);
+}
+function bothKneelAbs(){
+  return {
+    left_hip:0, left_knee:100, left_ankle:40, left_hip_out:0,
+    right_hip:0, right_knee:100, right_ankle:40, right_hip_out:0,
+    lower_back_pitch:8, lower_back_roll:0,
+    left_shoulder:16, right_shoulder:16, left_elbow:22, right_elbow:22
+  };
+}
+function riseFromKneelSteps(nextOffsets){
+  // Previous get-up: plant the front foot first while the kneeling knee stays
+  // down, then stand. Slow the slide; do not rise until that foot is planted.
+  const knee = kneelingKneeSide() || "left";
+  const holdDrop = Math.max(kneelDrop, kneelDropTarget, 0.08);
+  const steps = [];
+  if(knee === "both"){
+    steps.push({
+      offsets: gestureAbs({
+        left_hip:0, left_knee:48, left_ankle:14, left_hip_out:0,
+        right_hip:0, right_knee:48, right_ankle:14, right_hip_out:0
+      }),
+      drop: holdDrop * 0.4,
+      slow: true
+    });
+    const standBoth = emptyJoints();
+    Object.assign(standBoth, nextOffsets || {});
+    LEG_JOINTS.forEach(k => { if(standBoth[k] == null) standBoth[k] = 0; });
+    steps.push({offsets: standBoth, drop: 0, slow: true});
+    return steps;
+  }
+  const front = knee === "left" ? "right" : "left";
+  const j = liveJoints || state.joints;
+  if((j[front+"_hip"]||0) > 22 || isLegAirborne(j, front)){
+    steps.push({
+      offsets: gestureAbs({
+        [front+"_hip"]: 0, [front+"_knee"]: 8, [front+"_ankle"]: 0, [front+"_hip_out"]: 0,
+        [knee+"_hip"]: 0, [knee+"_knee"]: 100, [knee+"_ankle"]: 40, [knee+"_hip_out"]: 0
+      }),
+      drop: holdDrop,
+      slow: true,
+      planted: true,
+      front,
+      hold: 0.24
+    });
+  }
+  const stand = emptyJoints();
+  Object.assign(stand, nextOffsets || {});
+  LEG_JOINTS.forEach(k => { if(stand[k] == null) stand[k] = 0; });
+  steps.push({offsets: stand, drop: 0, slow: true});
+  return steps;
+}
+function unwrapGestureStep(step){
+  if(step && typeof step === "object" && step.offsets) return step;
+  return {offsets: step || {}, drop: null};
+}
+function applyGestureStep(step){
+  const s = unwrapGestureStep(step);
+  applyGestureMap(s.offsets);
+  if(s.drop != null) kneelDropTarget = Number(s.drop) || 0;
+  else kneelDropTarget = 0;
+}
+function startGestureSteps(pose, steps, extra){
+  extra = extra || {};
+  if(!extra.rising && isKneeling()){
+    const side = kneelingKneeSide();
+    const sameKneel = String(pose||"").startsWith("kneel_") && side && pose === ("kneel_"+side);
+    if(!sameKneel){
+      const seqIn = (steps || []).filter(Boolean);
+      const goingKneel = String(pose||"").startsWith("kneel_");
+      const first = unwrapGestureStep(seqIn[0] || {});
+      const standOffsets = goingKneel ? plantedLegOffsets() : (first.offsets || {});
+      const rise = riseFromKneelSteps(standOffsets);
+      const rest = goingKneel ? seqIn : seqIn.slice(1);
+      return startGestureSteps(pose, rise.concat(rest), {rising: true, onDone: extra.onDone});
+    }
+  }
+  if(walkTimer){ clearInterval(walkTimer); walkTimer = null; }
+  if(demoTimer){ clearInterval(demoTimer); demoTimer = null; }
+  pendingMove = null;
+  pendingWalkDir = null;
+  reverseStage = null;
+  stopWaving();
+  state.motion = "idle";
+  state.pose = pose;
+  const seq = (steps || []).filter(Boolean);
+  if(!seq.length){
+    gestureSteps = null;
+    kneelDropTarget = 0;
+    applyGestureMap({});
+    persistUi();
+    emit();
+    return;
+  }
+  gestureSteps = {pose, steps:seq, index:0, rising: !!extra.rising, onDone: extra.onDone || null};
+  applyGestureStep(seq[0]);
+  persistUi();
+  emit();
+}
+function tickGestureSteps(dt){
+  if(!gestureSteps) return;
+  if(!gesturesNearTargets()){
+    gestureSteps.holdClock = 0;
+    return;
+  }
+  const cur = unwrapGestureStep(gestureSteps.steps[gestureSteps.index]);
+  if(cur.drop != null){
+    const want = Number(cur.drop)||0;
+    if(Math.abs(kneelDrop - kneelDropTarget) > 0.02) return;
+    if(want <= 0 && kneelDrop > 0.03) return;
+  }
+  if(cur.planted && cur.front && isLegAirborne(liveJoints || state.joints, cur.front)) return;
+  if(cur.hold){
+    gestureSteps.holdClock = (gestureSteps.holdClock || 0) + (dt || 0.016);
+    if(gestureSteps.holdClock < cur.hold) return;
+  }
+  gestureSteps.holdClock = 0;
+  const next = gestureSteps.index + 1;
+  if(next >= gestureSteps.steps.length){
+    const done = gestureSteps.onDone;
+    gestureSteps = null;
+    persistUi();
+    emit();
+    if(typeof done === "function") done();
+    return;
+  }
+  gestureSteps.index = next;
+  applyGestureStep(gestureSteps.steps[next]);
+}
+function startLegOut(side){
+  // Load/stance foot plants first; only then does the free leg open to 20°.
+  // Persist/status echoes must not restart this or the leg twitches 0°↔20°.
+  if(!state.locked) return;
+  const moving = side === "left" ? "left" : "right";
+  const stance = moving === "left" ? "right" : "left";
+  const pose = moving+"_leg_out";
+  if(gestureSteps && gestureSteps.pose === pose) return;
+  const j = liveJoints || state.joints;
+  const plant = plantedLegOffsets();
+  const open = Object.assign({}, plant);
+  open[moving+"_hip_out"] = 20;
+  const stancePlanted = Math.abs(j[stance+"_hip_out"]||0) < 3 && !isLegAirborne(j, stance);
+  const alreadyOpen = Math.abs((j[moving+"_hip_out"]||0) - 20) < 3;
+  if(stancePlanted && alreadyOpen && !isLegAirborne(j, moving)){
+    state.pose = pose;
+    return;
+  }
+  const steps = stanceNeedsPlant(stance, moving) ? [plant, open] : [open];
+  startGestureSteps(pose, steps);
+  log("leg out "+moving+" — plant "+stance+" foot, then 20°");
+}
+function needsPlantBeforeRaise(stance, moving){
+  const j = liveJoints || state.joints;
+  return Math.abs(j[stance+"_hip_out"]||0) > 2
+    || Math.abs(j[moving+"_hip_out"]||0) > 2
+    || isLegAirborne(j, stance)
+    || isLegAirborne(j, moving);
+}
+function startLegRaise(side){
+  // Stance foot plants first; only then does the free leg raise to 90°/90°.
+  if(!state.locked) return;
+  const moving = side === "left" ? "left" : "right";
+  const stance = moving === "left" ? "right" : "left";
+  const pose = moving+"_leg_raise";
+  if(gestureSteps && gestureSteps.pose === pose) return;
+  const j = liveJoints || state.joints;
+  const lp = completeJoints(lockedPose);
+  const plant = plantedLegOffsets();
+  const raise = Object.assign({}, plant);
+  raise[moving+"_hip"] = 90 - (lp[moving+"_hip"]||0);
+  raise[moving+"_knee"] = 90 - (lp[moving+"_knee"]||0);
+  raise[moving+"_ankle"] = 0 - (lp[moving+"_ankle"]||0);
+  const stancePlanted = Math.abs(j[stance+"_hip_out"]||0) < 3 && !isLegAirborne(j, stance);
+  const alreadyRaised = Math.abs((j[moving+"_hip"]||0) - 90) < 6
+    && Math.abs((j[moving+"_knee"]||0) - 90) < 6;
+  if(stancePlanted && alreadyRaised){
+    state.pose = pose;
+    return;
+  }
+  const steps = needsPlantBeforeRaise(stance, moving) ? [plant, raise] : [raise];
+  startGestureSteps(pose, steps);
+  log("leg raise "+moving+" — plant "+stance+" foot, then 90°");
+}
+function gestureAbs(abs){
+  const lp = completeJoints(lockedPose);
+  const o = emptyJoints();
+  Object.keys(abs||{}).forEach(k => {
+    if(!defs[k]) return;
+    o[k] = (Number(abs[k])||0) - (Number(lp[k])||0);
+  });
+  return o;
+}
+function startKneelBoth(){
+  if(!state.locked) return;
+  const pose = "kneel_both";
+  const current = kneelingKneeSide();
+  if(gestureSteps && gestureSteps.pose === pose && current === "both" && !gestureSteps.rising) return;
+  const j = liveJoints || state.joints;
+  const already = current === "both"
+    && (j.left_knee||0) > 90 && (j.right_knee||0) > 90
+    && (j.left_hip||0) < 12 && (j.right_hip||0) < 12;
+  if(already){
+    state.pose = pose;
+    kneelDropTarget = Math.max(kneelDropTarget, kneelDrop, KNEEL_DROP);
+    return;
+  }
+  const keepDrop = Math.max(kneelDrop, kneelDropTarget, KNEEL_DROP);
+  const retract = {offsets: gestureAbs(bothKneelAbs()), drop: keepDrop, slow: true};
+  if(current === "left" || current === "right"){
+    startGestureSteps(pose, [retract], {rising: true});
+    log("kneel both — retract the raised knee to the ground");
+    return;
+  }
+  // From standing: same as a one-knee kneel (so the body is actually down),
+  // then retract the raised leg. Do not kneel in the air.
+  const stride = {offsets: gestureAbs({
+    right_hip:50, right_knee:36, right_ankle:12, right_hip_out:0,
+    left_hip:0, left_knee:8, left_ankle:0, left_hip_out:0
+  }), drop: 0};
+  const one = {offsets: gestureAbs({
+    right_hip:90, right_knee:63, right_ankle:25, right_hip_out:0,
+    left_hip:0, left_knee:100, left_ankle:40, left_hip_out:0,
+    lower_back_pitch:8, lower_back_roll:-6,
+    left_shoulder:16, right_shoulder:16, left_elbow:22, right_elbow:22
+  }), drop: KNEEL_DROP};
+  startGestureSteps(pose, [stride, one, retract]);
+  log("kneel both — one knee down, then retract the raised knee");
+}
+function startKneel(side){
+  // Kneel right: down on the right knee. Left foot steps forward, then right knee lowers.
+  if(!state.locked) return;
+  if(side === "both") return startKneelBoth();
+  const knee = side === "left" ? "left" : "right";
+  const front = knee === "left" ? "right" : "left";
+  const pose = "kneel_"+knee;
+  const current = kneelingKneeSide();
+  if(gestureSteps && gestureSteps.pose === pose && current === knee && !gestureSteps.rising) return;
+  const j = liveJoints || state.joints;
+  const plant = {offsets: plantedLegOffsets(), drop: 0};
+  const stride = {offsets: gestureAbs({
+    [front+"_hip"]: 50, [front+"_knee"]: 36, [front+"_ankle"]: 12, [front+"_hip_out"]: 0,
+    [knee+"_hip"]: 0, [knee+"_knee"]: 8, [knee+"_ankle"]: 0, [knee+"_hip_out"]: 0
+  }), drop: 0};
+  const down = {offsets: gestureAbs({
+    [front+"_hip"]: 90, [front+"_knee"]: 63, [front+"_ankle"]: 25, [front+"_hip_out"]: 0,
+    [knee+"_hip"]: 0, [knee+"_knee"]: 100, [knee+"_ankle"]: 40, [knee+"_hip_out"]: 0,
+    lower_back_pitch: 8,
+    lower_back_roll: knee === "right" ? 6 : -6,
+    left_shoulder: 16, right_shoulder: 16, left_elbow: 22, right_elbow: 22
+  }), drop: KNEEL_DROP};
+  const already = current === knee
+    && Math.abs((j[knee+"_knee"]||0) - 100) < 8
+    && Math.abs((j[front+"_hip"]||0) - 90) < 8
+    && Math.abs((j[knee+"_hip"]||0)) < 8
+    && kneelDrop > KNEEL_DROP * 0.55;
+  if(already){
+    state.pose = pose;
+    kneelDropTarget = KNEEL_DROP;
+    return;
+  }
+  const needPlant = needsPlantBeforeRaise(front, knee) || kneelDrop > 0.08;
+  const kneelSteps = needPlant ? [plant, stride, down] : [stride, down];
+  if(current && current !== knee){
+    startGestureSteps(pose, riseFromKneelSteps(plantedLegOffsets()).concat(kneelSteps), {rising: true});
+    log("kneel "+knee+" — plant, stand, then step "+front+" and lower "+knee+" knee");
+    return;
+  }
+  startGestureSteps(pose, kneelSteps);
+  log("kneel "+knee+" — step "+front+" forward, then lower "+knee+" knee");
+}
+
+function playAction(name){
+  if(name === "neutral"){
+    returnNeutral();
+    return;
+  }
+  if(!state.locked) return;
+  if(name === "legs_neutral"){
+    if(isKneeling()){
+      const keep = emptyJoints();
+      Object.assign(keep, gestureTarget);
+      LEG_JOINTS.forEach(k => { keep[k] = 0; });
+      startGestureSteps("custom", [{offsets: keep, drop: 0}]);
+      return;
+    }
+    gestureSteps = null;
+    kneelDropTarget = 0;
+    ["left_hip","left_hip_out","left_knee","left_ankle","right_hip","right_hip_out","right_knee","right_ankle"].forEach(k => { gestureTarget[k] = 0; });
+    applyLockedTargets();
+    state.pose = "custom";
+    persistUi();
+    emit();
+    return;
+  }
+  if(name === "wave"){
+    startWaveRight("UI");
+    return;
+  }
+  if(name === "tpose"){
+    setGesture({
+      left_shoulder:0, right_shoulder:0,
+      left_shoulder_out:90, right_shoulder_out:90,
+      left_elbow:0, right_elbow:0, left_wrist:0, right_wrist:0
+    });
+    state.pose = "tpose"; persistUi(); emit(); return;
+  }
+  if(name === "hands_up"){
+    // teela_v2 armsUp: sh 142, el -12 → MiniOS elbow +12
+    setGesture({
+      left_shoulder:142, right_shoulder:142, left_elbow:12, right_elbow:12,
+      left_shoulder_out:0, right_shoulder_out:0
+    });
+    state.pose = "hands_up"; persistUi(); emit(); return;
+  }
+  if(name === "arms_forward"){
+    // teela_v2: setGesture({shL:78, shR:78, elL:-8, elR:-8, shOutL:0, shOutR:0})
+    // setGesture already sets waving=false; overlay is only if(waving).
+    setGesture({
+      left_shoulder:78, right_shoulder:78, left_elbow:8, right_elbow:8,
+      left_shoulder_out:0, right_shoulder_out:0
+    });
+    state.pose = "arms_forward";
+    state.motion = "idle";
+    persistUi(); emit(); return;
+  }
+  if(name === "bend_forward"){
+    setGesture({lower_back_pitch:14, upper_back_pitch:24});
+    state.pose = "bend_forward"; persistUi(); emit(); return;
+  }
+  if(name === "ground_support"){
+    // teela_v2: el -12 → MiniOS +12
+    setGesture({
+      lower_back_pitch:20, upper_back_pitch:34,
+      left_shoulder:18, right_shoulder:18, left_shoulder_out:8, right_shoulder_out:8,
+      left_elbow:12, right_elbow:12, left_wrist:8, right_wrist:8,
+      left_knee:20, right_knee:20
+    });
+    state.pose = "ground_support"; persistUi(); emit(); return;
+  }
+  if(name === "left_leg_out"){
+    startLegOut("left");
+    return;
+  }
+  if(name === "right_leg_out"){
+    startLegOut("right");
+    return;
+  }
+  if(name === "left_leg_raise"){
+    startLegRaise("left");
+    return;
+  }
+  if(name === "right_leg_raise"){
+    startLegRaise("right");
+    return;
+  }
+  if(name === "kneel_left"){
+    startKneel("left");
+    return;
+  }
+  if(name === "kneel_right"){
+    startKneel("right");
+    return;
+  }
+  if(name === "kneel_both"){
+    startKneel("both");
+    return;
+  }
+}
+
+const MIC_EQ_HZ = [125, 250, 500, 1000, 2000, 4000, 8000];
+const MIC_EQ_LABELS = ["125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz"];
+const MIC_EQ_DEFAULT = [30, 70, 90, 100, 90, 55, 25];
+
+function ensureMicBars(){
+  const el = $("micAnalyzer");
+  if(!el || el.childElementCount) return el;
+  for(let i=0;i<24;i++) el.appendChild(document.createElement("span"));
+  return el;
+}
+function ensureMicEq(){
+  const el = $("micEq");
+  if(!el || el.childElementCount) return el;
+  MIC_EQ_HZ.forEach((_, i) => {
+    const row = document.createElement("div");
+    row.className = "slider-row";
+    const lab = document.createElement("label");
+    lab.htmlFor = "micEq" + i;
+    lab.textContent = MIC_EQ_LABELS[i];
+    const input = document.createElement("input");
+    input.id = "micEq" + i;
+    input.type = "range";
+    input.min = "0";
+    input.max = "100";
+    input.step = "1";
+    input.value = String(MIC_EQ_DEFAULT[i]);
+    input.setAttribute("aria-label", "EQ " + MIC_EQ_LABELS[i]);
+    const out = document.createElement("output");
+    out.id = "micEqO" + i;
+    out.textContent = String(MIC_EQ_DEFAULT[i]);
+    row.appendChild(lab);
+    row.appendChild(input);
+    row.appendChild(out);
+    el.appendChild(row);
+    input.addEventListener("input", () => {
+      out.textContent = input.value;
+      emitMicSettings();
+    });
+  });
+  return el;
+}
+function readMicEq(){
+  return MIC_EQ_HZ.map((_, i) => Number($("micEq" + i)?.value ?? MIC_EQ_DEFAULT[i]));
+}
+function applyMicSettingsUi(data){
+  if(data.sensitivity != null && $("micSens")) {
+    $("micSens").value = data.sensitivity;
+    if($("micSensO")) $("micSensO").textContent = String(Math.round(data.sensitivity));
+  }
+  if(data.barge != null && $("micBarge")) {
+    $("micBarge").value = data.barge;
+    if($("micBargeO")) $("micBargeO").textContent = String(Math.round(data.barge));
+  }
+  if(data.hang != null && $("micHang")) {
+    $("micHang").value = data.hang;
+    if($("micHangO")) $("micHangO").textContent = (Number(data.hang)/1000).toFixed(1) + "s";
+  }
+  if(Array.isArray(data.eq)){
+    data.eq.forEach((v, i) => {
+      const inp = $("micEq" + i);
+      const out = $("micEqO" + i);
+      if(!inp) return;
+      inp.value = String(Math.min(100, Math.max(0, Number(v) || 0)));
+      if(out) out.textContent = String(Math.round(Number(inp.value)));
+    });
+  }
+}
+function emitMicSettings(){
+  try{
+    window.parent.postMessage({
+      type: "mic-settings",
+      sensitivity: Number($("micSens")?.value || 50),
+      barge: Number($("micBarge")?.value || 15),
+      hang: Number($("micHang")?.value || 1200),
+      eq: readMicEq(),
+    }, "*");
+  }catch(_){}
+}
+function fmtPeakHz(hz){
+  const n = Number(hz || 0);
+  if(!n) return "—";
+  return n >= 1000 ? (n / 1000).toFixed(1) + "k" : Math.round(n) + " Hz";
+}
+function applyMicAnalyzer(data){
+  const bars = ensureMicBars();
+  const bins = Array.isArray(data.bins) ? data.bins : [];
+  const speechBins = Array.isArray(data.speechBins) ? data.speechBins : [];
+  if(bars){
+    bars.classList.toggle("tts", !!data.tts);
+    const spans = bars.children;
+    for(let i=0;i<spans.length;i++){
+      const v = Number(bins[i] || 0);
+      spans[i].style.height = Math.max(4, Math.min(100, v)) + "%";
+      spans[i].classList.toggle("speech", !!speechBins[i]);
+    }
+  }
+  const fill = $("micVuFill");
+  const vu = $("micVu");
+  const noiseMark = $("micVuNoise");
+  const rms = Math.max(0, Math.min(1, Number(data.rms || 0) * 12));
+  if(fill) fill.style.width = (rms * 100).toFixed(1) + "%";
+  if(noiseMark){
+    const n = Math.max(0, Math.min(1, Number(data.noise || 0) * 12));
+    noiseMark.style.left = (n * 100).toFixed(1) + "%";
+  }
+  if(vu){
+    vu.classList.toggle("speech", !!data.voiced);
+    vu.classList.toggle("hot", !!data.tts);
+  }
+  if($("micRms")) $("micRms").textContent = data.on ? Number(data.rms || 0).toFixed(3) : "—";
+  if($("micNoiseV")) $("micNoiseV").textContent = data.on ? Number(data.noise || 0).toFixed(3) : "—";
+  if($("micBandV")) $("micBandV").textContent = data.on ? Math.round(Number(data.band || 0) * 100) + "%" : "—";
+  if($("micPeakV")) $("micPeakV").textContent = data.on ? fmtPeakHz(data.peakHz) : "—";
+  const st = $("micHearState");
+  if(st){
+    if(!data.on) st.textContent = "Mic idle — start voice chat in Desk to see the analyzer.";
+    else if(data.tts) st.textContent = "Teela is talking — analyzer is amber. Speak clearly to barge in.";
+    else if(data.working) st.textContent = "Teela is thinking…";
+    else if(data.heard) st.textContent = "Hearing you — green bars are the speech band.";
+    else st.textContent = "Listening — green when your voice is detected.";
+  }
+}
+function resetHearingUi(){
+  if($("micSens")) $("micSens").value = 50;
+  if($("micSensO")) $("micSensO").textContent = "50";
+  if($("micBarge")) $("micBarge").value = 15;
+  if($("micBargeO")) $("micBargeO").textContent = "15";
+  if($("micHang")) $("micHang").value = 1200;
+  if($("micHangO")) $("micHangO").textContent = "1.2s";
+  MIC_EQ_DEFAULT.forEach((v, i) => {
+    if($("micEq" + i)) $("micEq" + i).value = String(v);
+    if($("micEqO" + i)) $("micEqO" + i).textContent = String(v);
+  });
+  emitMicSettings();
+}
+
+function bindUi(){
+  $("tabSetupBtn")?.addEventListener("click", () => setTab("Setup"));
+  $("tabActionBtn")?.addEventListener("click", () => setTab("Actions"));
+  $("tabWalkBtn")?.addEventListener("click", () => setTab("Walk"));
+  $("lockPose")?.addEventListener("click", () => {
+    userCalibrating = false;
+    Object.assign(state.joints, readCalibrationFromUi());
+    ensureLocked(false);
+    gestureTarget = emptyJoints();
+    gestureCurrent = emptyJoints();
+    applyLockedTargets();
+    persistUi();
+    emit();
+    setTab("Actions");
+  });
+  $("unlockPose")?.addEventListener("click", () => unlockPose());
+  $("resetPose")?.addEventListener("click", () => {
+    if(state.locked) return;
+    worldX = 0;
+    floorScrollX = 0;
+    floorScrollZ = 0;
+    faceYaw = 0;
+    reverseStage = null;
+    pendingWalkDir = null;
+    applySetupPreset("home");
+  });
+  ensureMicBars();
+  ensureMicEq();
+  ["micSens","micBarge","micHang"].forEach((id) => {
+    $(id)?.addEventListener("input", () => {
+      if(id === "micSens" && $("micSensO")) $("micSensO").textContent = $("micSens").value;
+      if(id === "micBarge" && $("micBargeO")) $("micBargeO").textContent = $("micBarge").value;
+      if(id === "micHang" && $("micHangO")) $("micHangO").textContent = (Number($("micHang").value)/1000).toFixed(1) + "s";
+      emitMicSettings();
+    });
+  });
+  $("micReset")?.addEventListener("click", () => resetHearingUi());
+  try{ window.parent.postMessage({type:"mic-settings-request"}, "*"); }catch(_){}
+  $("presetStraight")?.addEventListener("click", () => applySetupPreset("straight"));
+  $("presetHuman")?.addEventListener("click", () => applySetupPreset("human_neutral"));
+  $("presetForward")?.addEventListener("click", () => applySetupPreset("forward_lean"));
+  SLIDERS.forEach(([id, joint, isElbow]) => {
+    $(id)?.addEventListener("input", () => {
+      if(state.locked) return;
+      const el = $(id);
+      if(!el) return;
+      const v = isElbow ? fromUiElbow(el.value) : clampJoint(joint, el.value);
+      if(v != null && window.virtualBody) virtualBody.setJoint(joint, v, {source:"UI", fromSlider:true});
+      writeSlider(id, joint, isElbow);
+      emitVirtualBodyState(false);
+    });
+  });
+  $("walkLeft")?.addEventListener("click", () => startWalk("left"));
+  $("walkRight")?.addEventListener("click", () => startWalk("right"));
+  $("walkPlace")?.addEventListener("click", () => startWalk("place"));
+  $("walkBack")?.addEventListener("click", () => startWalk("back"));
+  $("stopMotion")?.addEventListener("click", () => {
+    stopWaving();
+    stopDemo();
+    if(state.motion === "walking") stopWalkSmooth();
+    else {
+      state.motion = "idle";
+      persistUi();
+      emit();
+    }
+  });
+  $("neutralAction")?.addEventListener("click", () => playAction("neutral"));
+  $("bendForward")?.addEventListener("click", () => playAction("bend_forward"));
+  $("armsForward")?.addEventListener("click", () => playAction("arms_forward"));
+  $("armsUp")?.addEventListener("click", () => playAction("hands_up"));
+  $("tPose")?.addEventListener("click", () => playAction("tpose"));
+  $("waveRight")?.addEventListener("click", () => playAction("wave"));
+  $("leftLegOut")?.addEventListener("click", () => playAction("left_leg_out"));
+  $("rightLegOut")?.addEventListener("click", () => playAction("right_leg_out"));
+  $("leftLegForward")?.addEventListener("click", () => playAction("left_leg_raise"));
+  $("rightLegForward")?.addEventListener("click", () => playAction("right_leg_raise"));
+  $("legsNeutral")?.addEventListener("click", () => playAction("legs_neutral"));
+  $("groundPose")?.addEventListener("click", () => playAction("ground_support"));
+  $("kneelLeft")?.addEventListener("click", () => playAction("kneel_left"));
+  $("kneelBoth")?.addEventListener("click", () => playAction("kneel_both"));
+  $("kneelRight")?.addEventListener("click", () => playAction("kneel_right"));
+  $("headLeft")?.addEventListener("click", () => { if(!state.locked) return; stopWaving(); gestureTarget.neck_pan = -45; applyLockedTargets(); persistUiSoon(); });
+  $("headRight")?.addEventListener("click", () => { if(!state.locked) return; stopWaving(); gestureTarget.neck_pan = 45; applyLockedTargets(); persistUiSoon(); });
+  $("headCenter")?.addEventListener("click", () => { if(!state.locked) return; stopWaving(); gestureTarget.neck_pan = 0; applyLockedTargets(); persistUiSoon(); });
+  $("headUp")?.addEventListener("click", () => { if(!state.locked) return; stopWaving(); gestureTarget.neck_tilt = 25; applyLockedTargets(); persistUiSoon(); });
+  $("headDown")?.addEventListener("click", () => { if(!state.locked) return; stopWaving(); gestureTarget.neck_tilt = -25; applyLockedTargets(); persistUiSoon(); });
+  $("headLevel")?.addEventListener("click", () => { if(!state.locked) return; stopWaving(); gestureTarget.neck_tilt = 0; applyLockedTargets(); persistUiSoon(); });
+  const partHost = $("partControls");
+  if(partHost && !partHost.childNodes.length){
+    Object.keys(PART_META).forEach(name => {
+      const meta = PART_META[name];
+      const row = document.createElement("div");
+      row.className = "part-row";
+      row.innerHTML = '<span class="part-name"></span>';
+      row.querySelector(".part-name").textContent = meta.label;
+      const minus = document.createElement("button");
+      minus.className = "motionCtl small";
+      minus.type = "button";
+      minus.textContent = meta.minus;
+      minus.disabled = true;
+      minus.addEventListener("click", () => nudgeJoint(name, meta.minusDir, "UI"));
+      const out = document.createElement("output");
+      out.id = "part-"+name;
+      out.textContent = "0°";
+      const plus = document.createElement("button");
+      plus.className = "motionCtl small";
+      plus.type = "button";
+      plus.textContent = meta.plus;
+      plus.disabled = true;
+      plus.addEventListener("click", () => nudgeJoint(name, meta.plusDir, "UI"));
+      row.appendChild(minus);
+      row.appendChild(out);
+      row.appendChild(plus);
+      partHost.appendChild(row);
+    });
+  }
+  $("frontView")?.addEventListener("click", () => animateCamera("front"));
+  $("sideView")?.addEventListener("click", () => animateCamera("side"));
+  $("backView")?.addEventListener("click", () => animateCamera("back"));
+  syncViewButtons();
+  const bindRange = (id, apply) => {
+    $(id)?.addEventListener("input", () => { apply(Number($(id).value)); syncSliders(); });
+  };
+  bindRange("speed", v => { walkSpeed = v; });
+  bindRange("stride", v => { stridePct = v; });
+  bindRange("armSwing", v => { armSwingPct = v; });
+  bindRange("sway", v => { swayPct = v; });
+  window.addEventListener("keydown", (e) => {
+    if(!state.locked) return;
+    const tag = (e.target && e.target.tagName) || "";
+    if(tag === "INPUT" || tag === "TEXTAREA") return;
+    if(e.key === "a" || e.key === "A" || e.key === "ArrowLeft"){ e.preventDefault(); startWalk("left"); }
+    else if(e.key === "d" || e.key === "D" || e.key === "ArrowRight"){ e.preventDefault(); startWalk("right"); }
+    else if(e.key === "s" || e.key === "S" || e.key === "ArrowDown"){ e.preventDefault(); startWalk("back"); }
+    else if(e.key === " " ){
+      e.preventDefault();
+      stopWaving();
+      if(state.motion === "walking") stopWalkSmooth();
+      else { state.motion = "idle"; persistUi(); emit(); }
+    }
+    else if(e.key === "n" || e.key === "N"){ e.preventDefault(); playAction("neutral"); }
+  });
+}
+
+/* ---------- gait / wave (teela_v2) ---------- */
+function smooth01(t){
+  t = Math.max(0, Math.min(1, t));
+  return t*t*(3-2*t);
+}
+function sampleKeys(t, keys){
+  t = ((t % 1) + 1) % 1;
+  for(let i=0;i<keys.length-1;i++){
+    const a = keys[i], b = keys[i+1];
+    if(t >= a[0] && t <= b[0]){
+      const q = smooth01((t - a[0]) / (b[0] - a[0]));
+      return a[1] + (b[1] - a[1]) * q;
+    }
+  }
+  return keys[keys.length-1][1];
+}
+function humanLegCycle(phase, strideScale, blend){
+  const hipDeg = sampleKeys(phase, [
+    [0.00, 16],[0.16,  8],[0.40, -4],[0.60,-12],[0.67,-8],
+    [0.73, -2],[0.79,  8],[0.86, 16],[0.93, 20],[1.00, 16]
+  ]);
+  const kneeAddDeg = sampleKeys(phase, [
+    [0.00,  2],[0.16,  4],[0.40,  1],[0.55,  8],[0.60, 22],
+    [0.67, 48],[0.73, 64],[0.79, 54],[0.86, 32],[0.93, 10],[1.00,  2]
+  ]);
+  const ankleDeg = sampleKeys(phase, [
+    [0.00,  2],[0.18,  0],[0.42, -2],[0.60,-10],[0.67,  2],
+    [0.73, 10],[0.79, 12],[0.86,  8],[0.93,  3],[1.00,  2]
+  ]);
+  const lift = sampleKeys(phase, [
+    [0.00, 0],[0.50, 0],[0.58, 0.05],[0.64, 0.55],[0.72, 1],
+    [0.80, 0.7],[0.88, 0.22],[0.95, 0.04],[1.00, 0]
+  ]);
+  return {
+    hip: hipDeg * strideScale * blend,
+    knee: (kneeAddDeg + lift * 18) * strideScale * blend,
+    ankle: ankleDeg * strideScale * blend,
+    lift: lift * blend,
+    hipDeg
+  };
+}
+
+function applyWalkFrame(dt, pose, blend){
+  pose = pose || liveJoints;
+  blend = blend == null ? 1 : blend;
+  if(blend < 0.001) return pose;
+  const strideScale = stridePct / 100;
+  const armScale = armSwingPct / 100;
+  const swayScale = swayPct / 100;
+  if(state.motion === "walking") gaitPhase += dt * 5.1 * walkSpeed;
+  const cycle = (((gaitPhase / (Math.PI * 2)) % 1) + 1) % 1;
+  const left = humanLegCycle(cycle, strideScale, blend);
+  const right = humanLegCycle((cycle + 0.5) % 1, strideScale, blend);
+  const armAmp = 25 * armScale * blend;
+  const leftArm = Math.max(-1, Math.min(1, right.hipDeg / 29)) * armAmp;
+  const rightArm = Math.max(-1, Math.min(1, left.hipDeg / 29)) * armAmp;
+  pose.left_hip = jv(pose,"left_hip") + left.hip;
+  pose.right_hip = jv(pose,"right_hip") + right.hip;
+  pose.left_knee = Math.max(0, jv(pose,"left_knee") + left.knee);
+  pose.right_knee = Math.max(0, jv(pose,"right_knee") + right.knee);
+  pose.left_ankle = jv(pose,"left_ankle") + left.ankle;
+  pose.right_ankle = jv(pose,"right_ankle") + right.ankle;
+  if(left.lift > 0.02) pose.left_hip += 4 * left.lift;
+  if(right.lift > 0.02) pose.right_hip += 4 * right.lift;
+  pose.left_shoulder = jv(pose,"left_shoulder") + leftArm;
+  pose.right_shoulder = jv(pose,"right_shoulder") + rightArm;
+  pose.left_elbow = Math.max(0, jv(pose,"left_elbow") + (7 + 7 * Math.max(0, leftArm / 25)) * blend);
+  pose.right_elbow = Math.max(0, jv(pose,"right_elbow") + (7 + 7 * Math.max(0, rightArm / 25)) * blend);
+  pose.lower_back_pitch = jv(pose,"lower_back_pitch") + 0.7 * (0.25 + 0.75 * Math.abs(Math.sin(gaitPhase * 2))) * blend;
+  pose.upper_back_pitch = jv(pose,"upper_back_pitch") + 1.5 * (0.35 + 0.65 * Math.abs(Math.sin(gaitPhase * 2))) * blend;
+  pose.neck_tilt = jv(pose,"neck_tilt") - 1.0 * Math.sin(gaitPhase * 2) * blend;
+  Object.keys(defs).forEach(k => { const v = clampJoint(k, pose[k]); if(v!=null) pose[k]=v; });
+  pose.left_knee = Math.max(0, pose.left_knee||0);
+  pose.right_knee = Math.max(0, pose.right_knee||0);
+  const traveling = state.walkDir === "left" || state.walkDir === "right" || state.walkDir === "back" || state.walkDir === "south";
+  const travelDir = reverseStage === "stopping" ? reverseFromDir : (state.motion === "walking" && traveling ? state.walkDir : null);
+  const axis = headingOf(travelDir || "place");
+  const speed = 0.30 * walkSpeed * strideScale * dt * blend;
+  if(travelDir){
+    if(axis === "east") floorScrollX += speed;
+    else if(axis === "west") floorScrollX -= speed;
+    else if(axis === "north") floorScrollZ -= speed;
+    else if(axis === "south") floorScrollZ += speed;
+  }
+  const liftBob = Math.max(left.lift, right.lift) * 0.012;
+  rootBob = blend * (0.004 + (1 - Math.cos(gaitPhase * 2)) * 0.005) + liftBob;
+  rootLateral = 0;
+  pelvisRoll = blend * Math.sin(gaitPhase) * 1.6 * DEG * swayScale;
+  pelvisYaw = blend * Math.sin(gaitPhase) * 0.8 * DEG;
+  bodyLean = blend * (traveling ? 1.0 : 0.4) * DEG;
+  return pose;
+}
+
+function waveEnvelope(){
+  const elapsed = performance.now() - waveStarted;
+  if(elapsed <= 0) return 0;
+  if(elapsed >= WAVE_MS) return 0;
+  if(elapsed > WAVE_MS - 450) return (WAVE_MS - elapsed) / 450;
+  return 1;
+}
+function finishWave(){
+  if(state.motion !== "waving") return;
+  state.motion = "idle";
+  waveBlend = 0;
+  const wrist = (waveSide === "left" ? "left" : "right") + "_wrist";
+  if(targets[wrist] != null) targets[wrist] = 0;
+  persistUiSoon();
+  emit();
+}
+function applyWaveFrame(pose, blend){
+  if(!waving) return pose;
+  pose = pose || liveJoints;
+  blend = blend == null ? 1 : blend;
+  const env = Math.max(0, Math.min(1, blend));
+  if(env < 0.001) return pose;
+  const side = waveSide === "left" ? "left" : "right";
+  const elbow = side + "_elbow";
+  const wrist = side + "_wrist";
+  const wt = (performance.now() - waveStarted) * 0.0105;
+  pose[elbow] = jv(pose, elbow) - 12 * Math.sin(wt * 1.4) * env;
+  pose[wrist] = 0;
+  const v = clampJoint(elbow, pose[elbow]);
+  if(v != null) pose[elbow] = v;
+  return pose;
+}
+
+/* ---------- WebGL ---------- */
+const VS = `
+attribute vec3 aPos;
+attribute vec3 aNrm;
+attribute float aW;
+uniform mat4 uMVP;
+uniform mat4 uModel;
+uniform mat4 uVP;
+uniform mat4 uBone0;
+uniform mat4 uBone1;
+uniform mat3 uN;
+uniform mat3 uN1;
+uniform vec3 uOff;
+uniform float uSkin;
+varying vec3 vN;
+varying vec3 vW;
+void main(){
+  if(uSkin < 0.5){
+    vec4 w = uModel * vec4(aPos,1.0);
+    vW = w.xyz;
+    vN = normalize(uN * aNrm);
+    gl_Position = uMVP * vec4(aPos,1.0);
+  } else {
+    vec4 p0 = uBone0 * vec4(aPos,1.0);
+    vec4 p1 = uBone1 * vec4(aPos + uOff, 1.0);
+    vec4 w = mix(p0, p1, aW);
+    vW = w.xyz;
+    vec3 n0 = uN * aNrm;
+    vec3 n1 = uN1 * aNrm;
+    vN = normalize(mix(n0, n1, aW));
+    gl_Position = uVP * w;
+  }
+}`;
+const FS = `
+precision mediump float;
+varying vec3 vN;
+varying vec3 vW;
+uniform vec3 uColor;
+uniform vec3 uLight;
+uniform vec3 uEye;
+void main(){
+  vec3 n = normalize(vN);
+  vec3 l = normalize(uLight);
+  vec3 v = normalize(uEye - vW);
+  if(dot(n, v) < 0.0) n = -n;
+  float diff = max(0.0, dot(n,l));
+  float fill = max(0.0, dot(n, v)) * 0.32;
+  float spec = pow(max(0.0, dot(reflect(-l,n), v)), 28.0);
+  float ambient = 0.20;
+  vec3 col = uColor * (ambient + 0.78*diff + fill) + vec3(0.20,0.18,0.14)*spec;
+  float fog = smoothstep(7.5, 14.0, length(uEye - vW));
+  col = mix(col, vec3(0.043,0.067,0.094), fog);
+  gl_FragColor = vec4(col,1.0);
+}`;
+
+function mat4(){ return new Float32Array(16); }
+function ident(o){ o[0]=1;o[1]=0;o[2]=0;o[3]=0;o[4]=0;o[5]=1;o[6]=0;o[7]=0;o[8]=0;o[9]=0;o[10]=1;o[11]=0;o[12]=0;o[13]=0;o[14]=0;o[15]=1; return o; }
+function mul(a,b,o){
+  const r = o || mat4();
+  for(let i=0;i<4;i++){
+    const ai0=a[i],ai1=a[i+4],ai2=a[i+8],ai3=a[i+12];
+    r[i]    = ai0*b[0] + ai1*b[1] + ai2*b[2] + ai3*b[3];
+    r[i+4]  = ai0*b[4] + ai1*b[5] + ai2*b[6] + ai3*b[7];
+    r[i+8]  = ai0*b[8] + ai1*b[9] + ai2*b[10]+ ai3*b[11];
+    r[i+12] = ai0*b[12]+ ai1*b[13]+ ai2*b[14]+ ai3*b[15];
+  }
+  return r;
+}
+function copy(a,o){ o.set(a); return o; }
+function trans(m,x,y,z){
+  const t = ident(mat4()); t[12]=x; t[13]=y; t[14]=z;
+  return mul(m,t,mat4());
+}
+function rotX(m,a){
+  const c=Math.cos(a), s=Math.sin(a);
+  const r=ident(mat4()); r[5]=c; r[6]=s; r[9]=-s; r[10]=c;
+  return mul(m,r,mat4());
+}
+function rotY(m,a){
+  const c=Math.cos(a), s=Math.sin(a);
+  const r=ident(mat4()); r[0]=c; r[2]=-s; r[8]=s; r[10]=c;
+  return mul(m,r,mat4());
+}
+function rotZ(m,a){
+  const c=Math.cos(a), s=Math.sin(a);
+  const r=ident(mat4()); r[0]=c; r[1]=s; r[4]=-s; r[5]=c;
+  return mul(m,r,mat4());
+}
+function scaleM(m,x,y,z){
+  const r=ident(mat4()); r[0]=x; r[5]=y; r[10]=z;
+  return mul(m,r,mat4());
+}
+function perspective(out, fovy, aspect, near, far){
+  ident(out);
+  const f = 1/Math.tan(fovy/2);
+  out[0]=f/aspect; out[5]=f; out[10]=(far+near)/(near-far); out[11]=-1;
+  out[14]=(2*far*near)/(near-far); out[15]=0;
+  return out;
+}
+function lookAt(out, ex,ey,ez, cx,cy,cz, ux,uy,uz){
+  let zx=ex-cx, zy=ey-cy, zz=ez-cz;
+  let zl=Math.hypot(zx,zy,zz)||1; zx/=zl; zy/=zl; zz/=zl;
+  let xx=uy*zz-uz*zy, xy=uz*zx-ux*zz, xz=ux*zy-uy*zx;
+  let xl=Math.hypot(xx,xy,xz)||1; xx/=xl; xy/=xl; xz/=xl;
+  const yx=zy*xz-zz*xy, yy=zz*xx-zx*xz, yz=zx*xy-zy*xx;
+  out[0]=xx; out[1]=yx; out[2]=zx; out[3]=0;
+  out[4]=xy; out[5]=yy; out[6]=zy; out[7]=0;
+  out[8]=xz; out[9]=yz; out[10]=zz; out[11]=0;
+  out[12]=-(xx*ex+xy*ey+xz*ez);
+  out[13]=-(yx*ex+yy*ey+yz*ez);
+  out[14]=-(zx*ex+zy*ey+zz*ez);
+  out[15]=1;
+  return out;
+}
+function nmat(m){
+  // inverse-transpose of upper 3x3, assume mostly rotation+uniform
+  return new Float32Array([m[0],m[1],m[2], m[4],m[5],m[6], m[8],m[9],m[10]]);
+}
+function xformPoint(m, p){
+  const x = p[0], y = p[1], z = p[2];
+  return [
+    m[0]*x + m[4]*y + m[8]*z + m[12],
+    m[1]*x + m[5]*y + m[9]*z + m[13],
+    m[2]*x + m[6]*y + m[10]*z + m[14]
+  ];
+}
+
+function makeBox(){
+  const p=[], n=[];
+  const faces = [
+    [[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1],[0,0,1]],
+    [[-1,-1,-1],[-1,1,-1],[1,1,-1],[1,-1,-1],[0,0,-1]],
+    [[-1,1,-1],[-1,1,1],[1,1,1],[1,1,-1],[0,1,0]],
+    [[-1,-1,-1],[1,-1,-1],[1,-1,1],[-1,-1,1],[0,-1,0]],
+    [[1,-1,-1],[1,1,-1],[1,1,1],[1,-1,1],[1,0,0]],
+    [[-1,-1,-1],[-1,-1,1],[-1,1,1],[-1,1,-1],[-1,0,0]]
+  ];
+  faces.forEach(f => {
+    const [a,b,c,d,nn] = f;
+    [[a,b,c],[a,c,d]].forEach(tri => {
+      tri.forEach(v => { p.push(v[0],v[1],v[2]); n.push(nn[0],nn[1],nn[2]); });
+    });
+  });
+  return {pos:new Float32Array(p), nrm:new Float32Array(n), count:p.length/3};
+}
+
+let gl, prog, u = {}, box, cam = {yaw:0, pitch:0.08, dist:2.9};
+let aPos = 0, aNrm = 1, aW = 2;
+let meshParts = null;
+let camAnim = null;
+let camView = "front";
+const CAM_VIEWS = {
+  front: {yaw:0, pitch:0},
+  side: {yaw:Math.PI*0.5, pitch:0},
+  back: {yaw:Math.PI, pitch:0}
+};
+function lerp(a,b,t){ return a + (b-a)*t; }
+function lerpAngle(a,b,t){
+  let d = b - a;
+  while(d > Math.PI) d -= Math.PI*2;
+  while(d < -Math.PI) d += Math.PI*2;
+  return a + d*t;
+}
+function cameraForView(name){
+  const v = CAM_VIEWS[name] || CAM_VIEWS.front;
+  return {
+    yaw: faceYaw + v.yaw,
+    pitch: v.pitch,
+    dist: cam._fitted || cam.dist || 3.1
+  };
+}
+function syncViewButtons(){
+  ["front","side","back"].forEach(name => {
+    const el = $(name+"View");
+    if(el) el.classList.toggle("on", camView === name);
+  });
+}
+function animateCamera(name){
+  if(!CAM_VIEWS[name]) return;
+  camView = name;
+  const to = cameraForView(name);
+  camAnim = {
+    from: {yaw:cam.yaw, pitch:cam.pitch, dist:cam.dist},
+    to,
+    t0: performance.now(),
+    dur: 700
+  };
+  syncViewButtons();
+}
+function tickCamera(dt){
+  if(!camAnim) return;
+  let u = (performance.now() - camAnim.t0) / camAnim.dur;
+  if(u >= 1){ u = 1; }
+  const e = u<0.5 ? 2*u*u : 1 - Math.pow(-2*u+2, 2)/2;
+  cam.yaw = lerpAngle(camAnim.from.yaw, camAnim.to.yaw, e);
+  cam.pitch = lerp(camAnim.from.pitch, camAnim.to.pitch, e);
+  cam.dist = lerp(camAnim.from.dist, camAnim.to.dist, e);
+  if(u >= 1) camAnim = null;
+}
+const BONE = [0.96, 0.92, 0.84];
+const BRASS = [0.92, 0.74, 0.32];
+const DARK = [0.38, 0.42, 0.48];
+const GROUND = [0.18, 0.24, 0.30];
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function initGL(){
+  const canvas = $("gl");
+  gl = canvas.getContext("webgl", {antialias:true, depth:true, alpha:false, failIfMajorPerformanceCaveat:false})
+    || canvas.getContext("experimental-webgl", {antialias:true, depth:true, alpha:false});
+  if(!gl) throw new Error("WebGL is not available");
+  prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  gl.useProgram(prog);
+  box = makeBox();
+  aPos = gl.getAttribLocation(prog, "aPos");
+  aNrm = gl.getAttribLocation(prog, "aNrm");
+  aW = gl.getAttribLocation(prog, "aW");
+  gl.enableVertexAttribArray(aPos);
+  gl.enableVertexAttribArray(aNrm);
+  box.posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, box.posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, box.pos, gl.STATIC_DRAW);
+  box.nrmBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, box.nrmBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, box.nrm, gl.STATIC_DRAW);
+  gl.getExtension("OES_element_index_uint");
+  ["uMVP","uModel","uN","uN1","uVP","uBone0","uBone1","uOff","uSkin","uColor","uLight","uEye"].forEach(name => { u[name] = gl.getUniformLocation(prog, name); });
+  gl.uniform1f(u.uSkin, 0);
+  gl.enable(gl.DEPTH_TEST);
+  gl.disable(gl.CULL_FACE);
+  let dragging=false, lx=0, ly=0;
+  canvas.addEventListener("pointerdown", e => { dragging=true; lx=e.clientX; ly=e.clientY; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener("pointerup", () => { dragging=false; });
+  canvas.addEventListener("pointermove", e => {
+    if(!dragging) return;
+    cam.yaw -= (e.clientX-lx)*0.006;
+    cam.pitch = Math.max(-0.16, Math.min(1.12, cam.pitch + (e.clientY-ly)*0.005));
+    lx=e.clientX; ly=e.clientY;
+    syncViewButtons();
+  });
+  canvas.addEventListener("dblclick", e => { e.preventDefault(); animateCamera("front"); });
+  canvas.addEventListener("wheel", e => {
+    e.preventDefault();
+    cam.dist = Math.max(1.6, Math.min(8.5, cam.dist + e.deltaY*0.003));
+  }, {passive:false});
+  let pinch0 = 0;
+  canvas.addEventListener("touchstart", e => {
+    if(e.touches.length === 2){
+      const a=e.touches[0], b=e.touches[1];
+      pinch0 = Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY);
+    }
+  }, {passive:true});
+  canvas.addEventListener("touchmove", e => {
+    if(e.touches.length === 2){
+      e.preventDefault();
+      const a=e.touches[0], b=e.touches[1];
+      const d = Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY);
+      if(pinch0 > 1){
+        cam.dist = Math.max(1.6, Math.min(8.5, cam.dist * (pinch0 / Math.max(1, d))));
+      }
+      pinch0 = d;
+    }
+  }, {passive:false});
+}
+
+const _mvp = mat4(), _view = mat4(), _proj = mat4(), _mv = mat4();
+function bindBox(){
+  gl.bindBuffer(gl.ARRAY_BUFFER, box.posBuf);
+  gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, box.nrmBuf);
+  gl.vertexAttribPointer(aNrm, 3, gl.FLOAT, false, 0, 0);
+}
+function drawBox(parent, sx, sy, sz, color){
+  bindBox();
+  const model = scaleM(parent, sx, sy, sz);
+  mul(_view, model, _mv);
+  mul(_proj, _mv, _mvp);
+  gl.uniformMatrix4fv(u.uMVP, false, _mvp);
+  gl.uniformMatrix4fv(u.uModel, false, model);
+  gl.uniformMatrix3fv(u.uN, false, nmat(model));
+  gl.uniform3fv(u.uColor, color);
+  gl.drawArrays(gl.TRIANGLES, 0, box.count);
+}
+function node(parent, x,y,z, rx,ry,rz){
+  let m = trans(parent, x,y,z);
+  if(rx) m = rotX(m, rx);
+  if(ry) m = rotY(m, ry);
+  if(rz) m = rotZ(m, rz);
+  return m;
+}
+
+const THIGH=0.40, SHIN=0.38, FOOT_H=0.07, FOOT_L=0.22;
+const UARM=0.28, FARM=0.26, HAND=0.12;
+const PELVIS_H=0.16, LUMBAR=0.12, THORAX=0.30, NECK=0.10, HEAD=0.20;
+
+function legLengths(){
+  if(meshParts){
+    const P = {};
+    meshParts.forEach(p => { P[p.name] = p.pivot; });
+    if(P.l_thigh && P.l_shin && P.l_foot){
+      const thigh = Math.hypot(P.l_thigh[0]-P.l_shin[0], P.l_thigh[1]-P.l_shin[1], P.l_thigh[2]-P.l_shin[2]);
+      const shin = Math.hypot(P.l_shin[0]-P.l_foot[0], P.l_shin[1]-P.l_foot[1], P.l_shin[2]-P.l_foot[2]);
+      if(thigh > 0.05 && shin > 0.05) return {thigh, shin, foot:0.04};
+    }
+  }
+  return {thigh:THIGH, shin:SHIN, foot:FOOT_H};
+}
+function stanceDrop(hip, knee){
+  const {thigh, shin} = legLengths();
+  const hr = (hip||0)*DEG, kr = (knee||0)*DEG;
+  const fy = thigh*Math.cos(hr) + shin*Math.cos(hr - kr);
+  return (thigh+shin) - fy;
+}
+function plantedDrop(j){
+  const l = stanceDrop(j.left_hip||0, j.left_knee||0);
+  const r = stanceDrop(j.right_hip||0, j.right_knee||0);
+  return Math.min(l, r);
+}
+function partWorldPivot(M, name){
+  if(!M || !M[name] || !meshParts) return null;
+  const part = meshParts.find(p => p.name === name);
+  if(!part) return null;
+  return xformPoint(M[name], part.pivot);
+}
+function supportClearanceY(M){
+  let y = Infinity;
+  ["l_shin","r_shin","l_foot","r_foot"].forEach(name => {
+    const w = partWorldPivot(M, name);
+    if(!w) return;
+    const pad = name.endsWith("foot") ? 0.05 : 0.03;
+    y = Math.min(y, w[1] - pad);
+  });
+  return y;
+}
+function kneelKneeClearanceY(M){
+  let y = Infinity;
+  ["l_shin","r_shin"].forEach(name => {
+    const w = partWorldPivot(M, name);
+    if(w) y = Math.min(y, w[1] - 0.03);
+  });
+  return y;
+}
+function liftKneelOutOfGround(j){
+  if(!meshParts || kneelDrop < 0.01) return;
+  const both = state.pose === "kneel_both" || kneelingKneeSide() === "both";
+  const y = both ? kneelKneeClearanceY(catrinaPose(j)) : supportClearanceY(catrinaPose(j));
+  if(y < 0.02){
+    const next = Math.max(0, kneelDrop - (0.02 - y));
+    if(both) kneelDrop = Math.max(next, KNEEL_DROP * 0.85);
+    else kneelDrop = next;
+    kneelDropTarget = Math.min(kneelDropTarget, kneelDrop);
+    if(both) kneelDropTarget = Math.max(kneelDropTarget, KNEEL_DROP * 0.85);
+  }
+}
+
+function attachBone(parentM, parentPivot, childPivot, rx, ry, rz){
+  let m = trans(parentM, childPivot[0]-parentPivot[0], childPivot[1]-parentPivot[1], childPivot[2]-parentPivot[2]);
+  if(rz) m = rotZ(m, rz);
+  if(ry) m = rotY(m, ry);
+  if(rx) m = rotX(m, rx);
+  return m;
+}
+function around(p, rx, ry, rz){
+  let m = trans(ident(mat4()), p[0], p[1], p[2]);
+  if(rz) m = rotZ(m, rz);
+  if(ry) m = rotY(m, ry);
+  if(rx) m = rotX(m, rx);
+  return trans(m, -p[0], -p[1], -p[2]);
+}
+function drawMeshPart(model, part, color){
+  gl.uniform1f(u.uSkin, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, part.posBuf);
+  gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, part.nrmBuf);
+  gl.vertexAttribPointer(aNrm, 3, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, part.idxBuf);
+  mul(_view, model, _mv);
+  mul(_proj, _mv, _mvp);
+  gl.uniformMatrix4fv(u.uMVP, false, _mvp);
+  gl.uniformMatrix4fv(u.uModel, false, model);
+  gl.uniformMatrix3fv(u.uN, false, nmat(model));
+  gl.uniform3fv(u.uColor, color);
+  gl.drawElements(gl.TRIANGLES, part.nidx, gl.UNSIGNED_INT, 0);
+}
+function catrinaPose(j){
+  const P = {};
+  meshParts.forEach(p => { P[p.name] = p; });
+  const pv = name => P[name].pivot;
+  const pelvisP = P.pelvis ? pv("pelvis") : (P.torso_lower ? pv("torso_lower") : [0, 0.95, 0]);
+  const rootMove = trans(ident(mat4()), 0, rootBob - kneelDrop, rootLateral);
+  const facing = around(pelvisP, 0, faceYaw, 0);
+  const body = around(pelvisP, bodyLean, pelvisYaw, pelvisRoll);
+  const root = mul(mul(rootMove, facing, mat4()), body, mat4());
+  const spineBase = pv(P.torso_lower ? "torso_lower" : "thorax");
+  const upperBack = pv(P.torso_upper ? "torso_upper" : "thorax");
+  const lower = mul(root, around(spineBase, (j.lower_back_pitch||0)*DEG, 0, (j.lower_back_roll||0)*DEG), mat4());
+  const upper = mul(lower, around(upperBack, (j.upper_back_pitch||0)*DEG, 0, 0), mat4());
+  const M = {pelvis:root, torso_lower:lower, torso_upper:upper, lumbar:lower, thorax:upper, torso:lower};
+  M.neck = mul(upper, around(pv("neck"), -(j.neck_tilt||0)*DEG, -(j.neck_pan||0)*DEG, 0), mat4());
+  M.head = M.neck;
+  // teela_v2 Left is +X (screen-right when she faces you). Packed mesh names
+  // r_* on +X and l_* on -X, so Left joints drive r_* and Right joints drive l_*.
+  M.l_uarm = mul(upper, around(pv("l_uarm"), -(j.right_shoulder||0)*DEG, 0, -(j.right_shoulder_out||0)*DEG), mat4());
+  M.l_farm = mul(M.l_uarm, around(pv("l_farm"), -(j.right_elbow||0)*DEG, 0, 0), mat4());
+  M.l_hand = mul(M.l_farm, around(pv("l_hand"), (j.right_wrist||0)*DEG, 0, 0), mat4());
+  M.r_uarm = mul(upper, around(pv("r_uarm"), -(j.left_shoulder||0)*DEG, 0, (j.left_shoulder_out||0)*DEG), mat4());
+  M.r_farm = mul(M.r_uarm, around(pv("r_farm"), -(j.left_elbow||0)*DEG, 0, 0), mat4());
+  M.r_hand = mul(M.r_farm, around(pv("r_hand"), (j.left_wrist||0)*DEG, 0, 0), mat4());
+  M.l_thigh = mul(root, around(pv("l_thigh"), -(j.right_hip||0)*DEG, 0, -(j.right_hip_out||0)*DEG), mat4());
+  M.l_shin = mul(M.l_thigh, around(pv("l_shin"), (j.right_knee||0)*DEG, 0, 0), mat4());
+  M.l_foot = mul(M.l_shin, around(pv("l_foot"), (j.right_ankle||0)*DEG, 0, 0), mat4());
+  M.r_thigh = mul(root, around(pv("r_thigh"), -(j.left_hip||0)*DEG, 0, (j.left_hip_out||0)*DEG), mat4());
+  M.r_shin = mul(M.r_thigh, around(pv("r_shin"), (j.left_knee||0)*DEG, 0, 0), mat4());
+  M.r_foot = mul(M.r_shin, around(pv("r_foot"), (j.left_ankle||0)*DEG, 0, 0), mat4());
+  return M;
+}
+function drawCatrina(j){
+  const M = catrinaPose(j);
+  const color = [0.93, 0.90, 0.82];
+  meshParts.forEach(part => {
+    const model = M[part.name];
+    if(model) drawMeshPart(model, part, color);
+  });
+}
+function ingestCatrina(buf){
+  if(meshParts || !gl || !buf) return;
+  try{
+    let raw = buf;
+    if(raw instanceof ArrayBuffer) raw = raw;
+    else if(raw && raw.buffer) raw = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+    const u8 = new Uint8Array(raw);
+    const ready = (ab) => {
+      meshParts = parseCatrina(ab);
+      lastRenderSig = "";
+      $("loading")?.remove();
+      fitCamera(true);
+      log("Las Catrina skeleton loaded");
+    };
+    if(u8[0] === 0x1f && u8[1] === 0x8b && typeof DecompressionStream === "function"){
+      new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer().then(ready).catch((err) => {
+        log("mesh unzip failed: "+err.message);
+        $("loading")?.remove();
+      });
+      return;
+    }
+    ready(raw);
+  }catch(err){
+    log("mesh parse failed: "+err.message);
+    $("loading")?.remove();
+  }
+}
+function parseCatrina(buf){
+  const dv = new DataView(buf);
+  let o = 0;
+  const mag = String.fromCharCode.apply(null, new Uint8Array(buf, 0, 8));
+  if(mag !== "TEELAMES") throw new Error("bad mesh magic");
+  o = 8;
+  const ver = dv.getUint32(o, true); o += 4;
+  const n = dv.getUint32(o, true); o += 4;
+  const parts = [];
+  for(let i=0;i<n;i++){
+    const nl = dv.getUint8(o); o += 1;
+    let name = "";
+    for(let k=0;k<nl;k++) name += String.fromCharCode(dv.getUint8(o+k));
+    o += nl;
+    const parent = dv.getInt16(o, true); o += 2;
+    const px = dv.getFloat32(o, true); o += 4;
+    const py = dv.getFloat32(o, true); o += 4;
+    const pz = dv.getFloat32(o, true); o += 4;
+    const nverts = dv.getUint32(o, true); o += 4;
+    const nidx = dv.getUint32(o, true); o += 4;
+    const pos = new Float32Array(nverts * 3);
+    for(let k=0;k<nverts;k++){
+      pos[k*3] = dv.getFloat32(o, true); o += 4;
+      pos[k*3+1] = dv.getFloat32(o, true); o += 4;
+      pos[k*3+2] = dv.getFloat32(o, true); o += 4;
+    }
+    const nrm = new Float32Array(nverts * 3);
+    for(let k=0;k<nverts*3;k++){ nrm[k] = dv.getFloat32(o, true); o += 4; }
+    const idx = new Uint32Array(nidx);
+    for(let k=0;k<nidx;k++){ idx[k] = dv.getUint32(o, true); o += 4; }
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+    const nrmBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, nrmBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, nrm, gl.STATIC_DRAW);
+    const idxBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    parts.push({name, parent, pivot:[px,py,pz], nverts, nidx, posBuf, nrmBuf, idxBuf});
+  }
+  return parts;
+}
+async function loadCatrina(){
+  if(meshParts) return;
+  const status = $("loadStatus");
+  if(status) status.textContent = "Downloading Las Catrina mesh…";
+  const res = await fetch("/ui/las-catrina.bin.gz?v=62", {credentials:"omit"});
+  if(!res.ok) throw new Error("mesh HTTP "+res.status);
+  const raw = await res.arrayBuffer();
+  ingestCatrina(raw);
+}
+function drawSkeleton(){
+  const j = liveJoints || state.joints;
+  if(meshParts){
+    drawCatrina(j);
+    return;
+  }
+  const support = kneelDrop > 0.05 ? 0 : plantedDrop(j);
+  const hipY = FOOT_H + THIGH + SHIN - support + rootBob - kneelDrop;
+  const root = trans(ident(mat4()), 0, hipY, rootLateral);
+  const pelvis = node(root, 0,0,0, bodyLean, faceYaw + pelvisYaw, pelvisRoll);
+  drawBox(trans(pelvis, 0, 0.02, 0), 0.16, 0.09, 0.11, BONE);
+
+  const lumbar = node(pelvis, 0, PELVIS_H*0.55, 0, (j.lower_back_pitch||0)*DEG, 0, (j.lower_back_roll||0)*DEG);
+  drawBox(trans(lumbar, 0, LUMBAR*0.5, 0), 0.09, LUMBAR*0.5, 0.08, BONE);
+
+  const thorax = node(lumbar, 0, LUMBAR, 0, (j.upper_back_pitch||0)*DEG, 0, 0);
+  drawBox(trans(thorax, 0, THORAX*0.52, 0.01), 0.15, THORAX*0.5, 0.10, BONE);
+  drawBox(trans(thorax, 0, THORAX*0.72, 0.0), 0.17, 0.035, 0.11, DARK);
+
+  const neckM = node(thorax, 0, THORAX, 0, -(j.neck_tilt||0)*DEG, (j.neck_pan||0)*DEG, 0);
+  drawBox(trans(neckM, 0, NECK*0.5, 0), 0.045, NECK*0.5, 0.05, BONE);
+  const headM = trans(neckM, 0, NECK+HEAD*0.42, 0.02);
+  drawBox(headM, 0.08, HEAD*0.42, 0.09, BONE);
+  drawBox(trans(headM, 0, -0.07, 0.02), 0.055, 0.045, 0.06, [0.82,0.78,0.72]);
+
+  function arm(side){
+    const sign = side === "left" ? 1 : -1;
+    const sh = (j[side+"_shoulder"]||0)*DEG;
+    const out = (j[side+"_shoulder_out"]||0)*DEG;
+    const el = (j[side+"_elbow"]||0)*DEG;
+    const wr = (j[side+"_wrist"]||0)*DEG;
+    let m = trans(thorax, sign*0.17, THORAX*0.82, 0);
+    m = rotZ(m, sign*out);
+    m = rotX(m, -sh);
+    drawBox(m, 0.038, 0.038, 0.038, BRASS);
+    const upper = trans(m, 0, -UARM*0.5, 0);
+    drawBox(upper, 0.038, UARM*0.5, 0.038, BONE);
+    let em = trans(m, 0, -UARM, 0);
+    em = rotX(em, -el);
+    drawBox(em, 0.032, 0.032, 0.032, BRASS);
+    const fore = trans(em, 0, -FARM*0.5, 0);
+    drawBox(fore, 0.032, FARM*0.5, 0.032, BONE);
+    let wm = trans(em, 0, -FARM, 0);
+    wm = rotX(wm, wr);
+    drawBox(wm, 0.028, 0.028, 0.028, BRASS);
+    drawBox(trans(wm, 0, -HAND*0.42, 0.01), 0.045, HAND*0.42, 0.02, BONE);
+  }
+  function leg(side){
+    const sign = side === "left" ? 1 : -1;
+    const hip = (j[side+"_hip"]||0)*DEG;
+    const out = (j[side+"_hip_out"]||0)*DEG;
+    const kn = (j[side+"_knee"]||0)*DEG;
+    const an = (j[side+"_ankle"]||0)*DEG;
+    let m = trans(pelvis, sign*0.09, -0.02, 0);
+    m = rotZ(m, -sign*out);
+    m = rotX(m, -hip);
+    drawBox(m, 0.045, 0.045, 0.045, BRASS);
+    drawBox(trans(m, 0, -THIGH*0.5, 0), 0.05, THIGH*0.5, 0.05, BONE);
+    let km = trans(m, 0, -THIGH, 0);
+    km = rotX(km, kn);
+    drawBox(km, 0.038, 0.038, 0.038, BRASS);
+    drawBox(trans(km, 0, -SHIN*0.5, 0), 0.04, SHIN*0.5, 0.04, BONE);
+    let am = trans(km, 0, -SHIN, 0);
+    am = rotX(am, an);
+    drawBox(am, 0.032, 0.032, 0.032, BRASS);
+    drawBox(trans(am, 0, -FOOT_H*0.2, FOOT_L*0.28), 0.045, FOOT_H*0.45, FOOT_L*0.5, BONE);
+  }
+  arm("left"); arm("right");
+  leg("left"); leg("right");
+}
+
+function wrapShift(scroll, step){
+  return ((-scroll % step) + step) % step;
+}
+function drawGround(){
+  const g = ident(mat4());
+  const step = 0.35;
+  const shiftX = wrapShift(floorScrollX, step);
+  const shiftZ = wrapShift(floorScrollZ, step);
+  for(let i=-14;i<=14;i++){
+    const x = (i * step) + shiftX;
+    const z = (i * step) + shiftZ;
+    drawBox(trans(g, x, 0.002, 0), 0.012, 0.004, 8.0, GROUND);
+    drawBox(trans(g, 0, 0.002, z), 8.0, 0.004, 0.012, GROUND);
+  }
+  drawBox(trans(g, 0, -0.02, 0), 10.0, 0.02, 10.0, [0.07,0.10,0.14]);
+}
+
+function resize(){
+  const canvas = $("gl");
+  if(!canvas || !gl) return 1;
+  const rect = canvas.getBoundingClientRect();
+  const cssW = Math.max(rect.width, canvas.clientWidth, 1);
+  const cssH = Math.max(rect.height, canvas.clientHeight, 1);
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(cssW * dpr));
+  const h = Math.max(1, Math.round(cssH * dpr));
+  if(canvas.width !== w || canvas.height !== h){
+    canvas.width = w; canvas.height = h;
+  }
+  gl.viewport(0,0,w,h);
+  return w/h;
+}
+
+function fitCamera(force){
+  const canvas = $("gl");
+  if(!canvas) return;
+  const w = Math.max(1, canvas.clientWidth || canvas.getBoundingClientRect().width);
+  const h = Math.max(1, canvas.clientHeight || canvas.getBoundingClientRect().height);
+  if(w < 2 || h < 2) return;
+  const aspect = w/h;
+  let dist = 3.1;
+  if(aspect < 0.85) dist = 3.7;
+  if(aspect < 0.62) dist = 4.3;
+  if(h < 260) dist += 0.45;
+  if(h < 180) dist += 0.55;
+  if(force || Math.abs((cam._fitted||0) - dist) > 0.35){
+    cam.dist = dist;
+    if(cam._fitted == null){
+      const home = cameraForView(camView);
+      cam.pitch = home.pitch;
+      cam.yaw = home.yaw;
+    }
+    cam._fitted = dist;
+  }
+}
+
+function render3d(){
+  if(!gl) return;
+  const aspect = resize();
+  gl.clearColor(0.043, 0.067, 0.094, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  const focusY = 1.04;
+  const ex = Math.sin(cam.yaw)*Math.cos(cam.pitch)*cam.dist;
+  const ey = focusY + Math.sin(cam.pitch)*cam.dist;
+  const ez = Math.cos(cam.yaw)*Math.cos(cam.pitch)*cam.dist;
+  lookAt(_view, ex,ey,ez, 0, focusY, 0, 0,1,0);
+  perspective(_proj, 40*DEG, Math.max(0.35, aspect), 0.08, 24);
+  gl.uniform3f(u.uLight, 0.18, 0.62, 1.0);
+  gl.uniform3f(u.uEye, ex, ey, ez);
+  drawGround();
+  drawSkeleton();
+}
+
+let lastRenderSig = "";
+// Frame skip: a static scene costs nothing to hold in memory, so re-rendering
+// it is pure waste — on SwiftShader (software WebGL) every frame is CPU. The
+// loop keeps ticking (cheap); render only when something visibly changes.
+function frameSig(){
+  const j = liveJoints || state.joints;
+  let s = cam.yaw.toFixed(2)+"|"+cam.pitch.toFixed(2)+"|"+cam.dist.toFixed(2)
+    + "|"+faceYaw.toFixed(3)+"|"+(state.locked?1:0)+"|"+(state.motion||"")
+    + "|"+(waving?1:0)+"|"+(state.motors&&!state.estop?1:0)
+    + "|"+(gaitBlend<0.002?0:gaitBlend.toFixed(3))
+    + "|"+kneelDrop.toFixed(3)+"|"+(reverseStage||"")+"|"+(pendingWalkDir==null?"":pendingWalkDir);
+  for(const k in j) s += k+Math.round((j[k]||0)*100)+";";
+  if(gl) s += "|" + gl.drawingBufferWidth + "x" + gl.drawingBufferHeight;
+  return s;
+}
+
+function tick(now){
+  const dt = lastFrame ? Math.min(0.05, (now-lastFrame)/1000) : 0.016;
+  lastFrame = now;
+  tickCamera(dt);
+  const powered = state.motors && !state.estop;
+  const poseEase = 1 - Math.exp(-dt * 6);
+  const blendEase = 1 - Math.exp(-dt * 5.5);
+  // teela_v2: while unlocked, the mesh is the Setup sliders every frame.
+  if(!state.locked){
+    const j = readCalibrationFromUi();
+    Object.assign(state.joints, j);
+    setTargets(j, true);
+    liveJoints = Object.assign({}, j);
+    const sig = frameSig();
+    if(sig !== lastRenderSig){
+      lastRenderSig = sig;
+      SLIDERS.forEach(([id, joint, isElbow]) => {
+        const out = $(id+"O");
+        if(out) out.textContent = Math.round(isElbow ? uiElbow(j[joint]||0) : (j[joint]||0))+"°";
+      });
+      render3d();
+      syncHud();
+    }
+    emitVirtualBodyState(false);
+    requestAnimationFrame(tick);
+    return;
+  }
+  if(powered){
+    // teela_v2: lerp gestureCurrent → gestureTarget, then locked + gesture + gait.
+    const riseStep = gestureSteps && unwrapGestureStep(gestureSteps.steps[gestureSteps.index]);
+    const slowRise = !!(riseStep && riseStep.slow);
+    const response = 1 - Math.exp(-dt * (slowRise ? 1.85 : 6));
+    Object.keys(defs).forEach(k => {
+      const cur = Number(gestureCurrent[k]||0)||0;
+      const dest = Number(gestureTarget[k]||0)||0;
+      gestureCurrent[k] = Math.abs(dest - cur) < 0.05 ? dest : cur + (dest - cur) * response;
+    });
+    const composed = composeLockedPose();
+    Object.assign(state.joints, composed);
+    setTargets(composed, true);
+  }
+  const riseStepDrop = gestureSteps && unwrapGestureStep(gestureSteps.steps[gestureSteps.index]);
+  const slowDrop = !!(riseStepDrop && riseStepDrop.slow);
+  kneelDrop += (kneelDropTarget - kneelDrop) * (1 - Math.exp(-dt * (slowDrop ? 1.55 : 3.4)));
+  if(Math.abs(kneelDrop - kneelDropTarget) < 0.003) kneelDrop = kneelDropTarget;
+  const wantGait = powered && state.motion === "walking";
+  const gaitRate = wantGait ? 4.0 : 2.25;
+  gaitBlend = lerp(gaitBlend, wantGait ? 1 : 0, 1 - Math.exp(-dt * 5.5));
+  const wantWave = powered && waving;
+  waveBlend = wantWave ? 1 : 0;
+  if(reverseStage === "stopping"){
+    stopClock += dt;
+    if(state.motion === "walking" && ((nearHeelStrike(gaitPhase) && stopClock > 0.12) || stopClock > 0.9)){
+      haltWalkKeepFacing();
+    }
+    if(state.motion !== "walking" && gaitBlend < 0.12){
+      if(pendingWalkDir != null){
+        reverseStage = "turning";
+        turnClock = 0;
+        turnFoot = 0;
+      } else {
+        reverseStage = null;
+      }
+      stopClock = 0;
+    }
+  } else if(state.motion === "walking"){
+    const d = yawDelta(faceYaw, desiredFaceYaw(state.walkDir));
+    if(Math.abs(d) < 0.25) faceYaw += d * Math.min(1, dt * 8);
+  } else if(!reverseStage){
+    const d = yawDelta(faceYaw, 0);
+    if(Math.abs(d) > 0.01) faceYaw += d * Math.min(1, dt * 5);
+    else { faceYaw = 0; state.heading = "south"; }
+  }
+  liveJoints = Object.assign({}, state.joints);
+  if(state.pose !== "wave") stopWaving();
+  if(gaitBlend > 0.002 && reverseStage !== "turning") applyWalkFrame(dt, liveJoints, gaitBlend);
+  if(reverseStage === "turning") tickStepTurn(dt, liveJoints);
+  if(gaitBlend < 0.002 && reverseStage !== "turning"){
+    rootBob = 0; rootLateral = 0; pelvisRoll = 0; pelvisYaw = 0; bodyLean = 0;
+  }
+  if(waving) applyWaveFrame(liveJoints, 1);
+  tickGestureSteps(dt);
+  if(pendingMove && airborneSides(state.joints).length === 0 && legsNearTargets()){
+    commitPendingMove();
+  }
+  liftKneelOutOfGround(liveJoints);
+  persistLiveIfChanged();
+  const sig = frameSig();
+  if(sig !== lastRenderSig){
+    lastRenderSig = sig;
+    render3d();
+    syncSliders();
+    syncHud();
+  }
+  requestAnimationFrame(tick);
+}
+
+function showError(msg){
+  const el = $("error");
+  if(!el) return;
+  el.style.display = "grid";
+  el.textContent = msg;
+}
+
+function bindResize(){
+  const stage = document.querySelector(".stage");
+  const onSize = () => {
+    resize();
+    fitCamera(false);
+  };
+  window.addEventListener("resize", onSize);
+  if(stage && typeof ResizeObserver !== "undefined"){
+    const ro = new ResizeObserver(onSize);
+    ro.observe(stage);
+  }
+  if(window.visualViewport){
+    window.visualViewport.addEventListener("resize", onSize);
+  }
+}
+
+function boot(){
+  bindUi();
+  syncLockUi();
+  syncSliders();
+  try{
+    initGL();
+    bindResize();
+    fitCamera(true);
+  }catch(err){
+    $("loading")?.remove();
+    showError("WebGL failed: "+err.message);
+    return;
+  }
+  requestAnimationFrame(tick);
+  try{ window.parent.postMessage({type:"robot-ready"}, "*"); }catch(_){}
+  try{ window.parent.postMessage({type:"catrina-mesh-request"}, "*"); }catch(_){}
+  loadCatrina().then(() => {
+    if(!meshParts) return;
+    $("loading")?.remove();
+    fitCamera(true);
+  }).catch(() => {
+    /* parent postMessage is the primary path inside the MiniOS sandbox */
+  });
+  setInterval(() => {
+    try{
+      if(RobotSim.uiHeld() || RobotSim.busy() || state.motion==="walking" || state.motion==="demo" || state.motion==="waving") return;
+      window.parent.postMessage({type:"robot-pull"}, "*");
+    }catch(_){}
+  }, 2000);
+}
+
+if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+else boot();
+})();
+</script>
+</body>
+</html>

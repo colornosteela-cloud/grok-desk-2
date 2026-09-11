@@ -1,0 +1,10 @@
+{
+  "listen_host": "10.0.0.yy",
+  "listen_port": 8742,
+  "node_name": "teela-jetson",
+  "cluster_token": "<shared 32+ byte urlsafe secret>",
+  "peers": [
+    {"name": "teela-brain", "url": "http://10.0.0.10:8742"},
+    {"name": "teela-body", "url": "http://10.0.0.xx:8742"}
+  ]
+}

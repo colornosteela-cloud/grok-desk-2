@@ -1,0 +1,145 @@
+# Grok Desk MiniOS — Grok Build Frontend
+
+Grok Desk is a Linux-first graphical frontend/runtime shell for **xAI Grok Build**. Grok Build remains the agent brain and communicates with the desk through its ACP stdio interface (`grok agent stdio`). Grok Desk adds chat, per-bot visual workspaces, browser/cursor control, code viewing/editing, terminals, build/test controls, app preview, and optional LAN bot federation.
+
+## Architecture
+
+Each bot gets its own real workspace at `~/grok-desks/<id>/workspace` and its own Grok state under `~/.grok/bots/<id>/`. The MiniOS does **not** maintain a fake copy of the filesystem: Grok Build, the editor, file explorer, terminal, preview, and build/test center all operate on the same workspace.
+
+```text
+User ↔ Grok Desk Chat ↔ ACP ↔ grok agent stdio (Grok Build)
+                              │
+                              ▼
+                       Bot real workspace
+                              │
+              ┌───────────────┼────────────────┐
+              ▼               ▼                ▼
+          Files/Editor     Terminal/Tests    Browser/Preview
+              └───────────────┼────────────────┘
+                              ▼
+                         MiniOS desktop
+                         + bot cursor
+```
+
+Grok Build decides whether a request only needs a chat response or requires workspace/tool activity. Grok Desk does not place a second AI router in front of the Grok agent.
+
+## MiniOS features
+
+- **Files** — graphical view of the bot's real workspace.
+- **Code Editor** — view and edit text/code files in the same workspace Grok Build uses.
+- **Terminal** — live PTY shell rooted in the bot workspace.
+- **Build & Test Center** — detects Node, Python, Rust, CMake, and Make projects; build/test jobs report exit status and output.
+- **Run App** — starts/stops a long-running per-bot development process without blocking chat.
+- **App Preview** — sandboxed preview for workspace HTML.
+- **Chromium Browser** — isolated browser profile for each bot with existing browser MCP controls.
+- **Bot Cursor** — a standard OS-style arrow pointer, independent of the user's physical mouse, with per-bot position plus point/click/double-click control.
+- **Persistent Visual Mirror** — a dedicated headless Chromium mirror continuously renders each bot's MiniOS and exposes actual JPEG frames to Grok Build through `desktop_observe` and `desktop_watch`.
+- **Grok Build TUI** — optional live TUI surface alongside ACP chat.
+
+The bot can use Grok Build's native file/bash tools for efficient work and MiniOS tools when visual interaction or demonstration is useful.
+
+### Semantic Desktop Driver
+
+For known MiniOS controls, Grok starts with `desktop_state` and uses stable app/window/object IDs such as `app_browser`, `win_browser`, and `obj_grok_close`. Semantic actions visibly drive the same MiniOS cursor/window manager, while raw coordinate cursor control remains the fallback for unfamiliar webpages and newly built interfaces. The agent profile explicitly tells Grok not to inspect Grok Desk source code merely to learn how to operate its own desktop.
+
+## Requirements
+
+- Linux
+- Python 3.11+
+- Current Grok Build CLI with `grok agent stdio`
+- A Chromium/Chrome binary for the browser surface
+
+Grok Desk probes the installed Grok CLI and enables optional flags only when they are advertised by that build. Runtime capability information is available at `/v1/runtime/grok`.
+
+Browser discovery checks `GROK_DESK_CHROME`, common system Chrome/Chromium commands, and installed Playwright Chromium caches. You can force a browser binary with:
+
+```bash
+export GROK_DESK_CHROME=/path/to/chromium
+```
+
+## Reimage / new GPUs
+
+After wiping the box, follow [docs/REIMAGE.md](docs/REIMAGE.md). This tree includes the Teela vLLM launcher (`teela/`) and the Catrina runtime mesh. Model weights and `grok login` are not in git.
+
+## Start
+
+Run Grok Desk as the same normal user that installed and authenticated Grok Build:
+
+```bash
+./start.sh
+```
+
+On teela-brain it is also a user systemd unit that **starts on reboot** (see [RELEASE_NOTES.md](RELEASE_NOTES.md) and [docs/hosts/teela-brain.md](docs/hosts/teela-brain.md)):
+
+```bash
+cp contrib/grok-desk.service ~/.config/systemd/user/grok-desk.service
+systemctl --user daemon-reload
+systemctl --user enable --now grok-desk.service
+loginctl enable-linger "$USER"
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8742/
+```
+
+To expose the desk on your LAN, change **Grok Desk address** in **User & Grok Build Settings** to the host's LAN address. Do not expose Grok Desk directly to the public Internet.
+
+`start.sh` honors these optional environment variables:
+
+```bash
+GROK_BIN=/path/to/grok
+GROK_DESK_PORT=8742
+GROK_DESKS=$HOME/grok-desks
+GROK_DESK_CHROME=/path/to/chromium
+GROK_DESK_SANDBOX=off
+```
+
+## Chat vs workspace behavior
+
+The per-bot agent profile tells Grok Build to answer normally in chat when no environment evidence is needed, and to use its real workspace/tools when the user asks it to create, modify, inspect, run, build, test, browse, debug, or verify something. It must verify work before claiming a build/test/UI succeeded.
+
+MiniOS presentation tools supplied to the ACP session include `desktop_state`, `desktop_observe`, `desktop_watch`, `desktop_open_app`, `desktop_move_cursor`, `desktop_click`, `desktop_double_click`, and `desktop_type_text`. `desktop_observe`/`desktop_watch` return the continuously rendered MiniOS JPEG frame so the bot can visually verify what is actually on its screen. These supplement rather than replace Grok Build's own coding tools.
+
+## Hello World visual acceptance test
+
+After Grok Build is installed/authenticated and Grok Desk is running, send a bot:
+
+```text
+Build a simple Hello World webpage in your workspace. Create the actual files, open the finished page in your MiniOS, and visually verify what is rendered before telling me it is done.
+```
+
+Expected result: the file exists in the bot workspace, it can be opened in Code/Files, the rendered **Hello World** page remains visible in the MiniOS Browser/Preview, and the agent performs `desktop_observe` or `desktop_watch` before reporting success.
+
+## Security boundaries
+
+Workspace paths are resolved with real path containment checks. Agent-created HTML previews run in sandboxed iframes without `allow-same-origin`. The UI authentication token is sent in an HttpOnly SameSite cookie for browser resources/SSE instead of being embedded in normal resource URLs, and the daemon adds baseline browser security headers.
+
+Each bot's MiniOS is intended to stay scoped to that bot's workspace and browser profile. Grok Desk's control plane remains separate from content created by an agent.
+
+## Tests
+
+Run the complete suite with explicit discovery:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Also run syntax checks when modifying the frontend/backend:
+
+```bash
+python3 -m py_compile deskd/*.py
+node --check ui/app.js
+node --check ui/grokbot-ui.js
+```
+
+## Cluster
+
+The existing multi-host cluster support remains available. Clone the same Grok Desk tree to each LAN host; each daemon uses that machine's own Grok Build installation, credentials, GPU/runtime, bot states, and workspaces. See `docs/cluster.md` and `docs/hosts/`.
+
+Do not commit `~/.grok/`, `desk.json`, `auth.json`, runtime tokens, `.env` files, browser profiles, or bot workspaces containing secrets.
+
+## Bot cursor
+
+Each bot has its own normal OS-style arrow cursor. Grok can point with `desktop_move_cursor`, click with `desktop_click`, and double-click with `desktop_double_click`. Browser clicks are forwarded to the bot's Chromium surface.

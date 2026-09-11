@@ -1,0 +1,769 @@
+#!/usr/bin/env bash
+# Launch vLLM for teela-brain on NVIDIA (CUDA), AMD (ROCm), or Intel Arc (XPU).
+# Model choice follows VRAM, not vendor: 8GB-class → Qwen3-VL-8B; 16GB+ → 27B GPTQ.
+# Does not download weights. Expects them already under MODELS_DIR.
+set -euo pipefail
+
+MODELS_DIR="${MODELS_DIR:-/home/roni/models}"
+QWEN_MODEL="${QWEN_MODEL:-$MODELS_DIR/Qwen3.8-27B-GPTQ-Int4}"
+MUSE_MODEL="${MUSE_MODEL:-$MODELS_DIR/Muse-Glimmer-30B}"
+QWEN_IMAGE="${QWEN_IMAGE:-intel/llm-scaler-vllm:0.21.0-b3}"
+MUSE_IMAGE="${MUSE_IMAGE:-intel/llm-scaler-vllm:0.21.0-b3.1}"
+CUDA_IMAGE="${CUDA_IMAGE:-vllm/vllm-openai:v0.28.0}"
+ROCM_IMAGE="${ROCM_IMAGE:-vllm/vllm-openai-rocm:v0.28.0}"
+TEELA_BACKEND="${TEELA_BACKEND:-auto}"
+CONTAINER_NAME="${CONTAINER_NAME:-teela-vllm}"
+HOST="${VLLM_HOST:-127.0.0.1}"
+PORT="${VLLM_PORT:-8000}"
+MUSE_MULTIMODAL="${MUSE_MULTIMODAL:-1}"
+TP="${TENSOR_PARALLEL_SIZE:-2}"
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=_docker.sh
+source "$HERE/_docker.sh"
+TARGET="${1:-qwen}"
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || { echo "missing command: $1" >&2; exit 1; }
+}
+
+log() { printf '[teela] %s\n' "$*"; }
+die() { printf '[teela] ERROR: %s\n' "$*" >&2; exit 1; }
+
+need_cmd curl
+
+detect_backend() {
+  local want="${TEELA_BACKEND,,}"
+  case "$want" in
+    cuda|nvidia) echo cuda; return ;;
+    rocm|amd) echo rocm; return ;;
+    xpu|intel) echo xpu; return ;;
+  esac
+  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+    echo cuda
+    return
+  fi
+  if [[ -e /dev/kfd ]] || command -v rocminfo >/dev/null 2>&1; then
+    echo rocm
+    return
+  fi
+  echo xpu
+}
+
+BACKEND="$(detect_backend)"
+log "backend=$BACKEND (TEELA_BACKEND=$TEELA_BACKEND)"
+
+if [[ "$BACKEND" == "cuda" ]]; then
+  command -v nvidia-smi >/dev/null 2>&1 || die "nvidia-smi missing — install NVIDIA driver + CUDA"
+  nvidia-smi -L >/dev/null 2>&1 || die "nvidia-smi sees no GPUs"
+elif [[ "$BACKEND" == "rocm" ]]; then
+  [[ -e /dev/kfd ]] || die "/dev/kfd missing — install AMD ROCm stack"
+  [[ -d /dev/dri ]] || die "/dev/dri missing — AMD GPU not visible"
+else
+  [[ -d /dev/dri ]] || die "/dev/dri missing — Intel Arc devices not visible"
+  ls /dev/dri/card* >/dev/null 2>&1 || die "no /dev/dri/card* (expected 2× Arc Pro B60)"
+  ls /dev/dri/renderD* >/dev/null 2>&1 || die "no /dev/dri/renderD*"
+fi
+
+FAST_CONTAINER_NAME="${FAST_CONTAINER_NAME:-teela-vllm-fast}"
+FAST_LEGACY_NAME="${FAST_LEGACY_NAME:-teela-llama-9b}"
+FAST_PORT="${FAST_PORT:-8001}"
+FAST_IMAGE="${FAST_IMAGE:-$QWEN_IMAGE}"
+FAST_MODEL_FP8="${FAST_MODEL_FP8:-$MODELS_DIR/Qwen3-VL-8B-Instruct-FP8}"
+FAST_MODEL_BF16="${FAST_MODEL_BF16:-$MODELS_DIR/Qwen3-VL-8B-Instruct}"
+
+start_fast_9b() {
+  local model_host="" quant_line="" dtype_line="  --dtype float16 \\"
+  # Intel VL recipe: BF16 Instruct + online FP8. Hub FP8 is fallback (no --quantization).
+  if [[ -f "$FAST_MODEL_BF16/config.json" ]]; then
+    model_host="$FAST_MODEL_BF16"
+    quant_line="  --quantization fp8 \\"
+  elif [[ -f "$FAST_MODEL_FP8/config.json" ]]; then
+    model_host="$FAST_MODEL_FP8"
+    quant_line=""
+    dtype_line="  --dtype auto \\"
+  else
+    die "Qwen3-VL-8B weights missing (tried $FAST_MODEL_BF16 and $FAST_MODEL_FP8)"
+  fi
+  if models="$(curl -fsS "http://127.0.0.1:${FAST_PORT}/v1/models" 2>/dev/null)"; then
+    if printf '%s' "$models" | grep -q 'qwen3-vl-8b'; then
+      log "Qwen3-VL-8B already up on :$FAST_PORT"
+      return 0
+    fi
+  fi
+  if ! dk image inspect "$FAST_IMAGE" >/dev/null 2>&1; then
+    log "pulling $FAST_IMAGE"
+    dk pull "$FAST_IMAGE"
+  fi
+  local name
+  for name in "$FAST_CONTAINER_NAME" "$FAST_LEGACY_NAME"; do
+    if dk ps -a --format '{{.Names}}' | grep -qx "$name"; then
+      log "stopping $name"
+      dk rm -f "$name" >/dev/null || true
+    fi
+  done
+  local model_base inner_fast
+  model_base="$(basename "$model_host")"
+  inner_fast="$HERE/.inner-fast.sh"
+  cat >"$inner_fast" <<EOF
+#!/bin/bash
+set -euo pipefail
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+exec vllm serve \\
+  --model /models/${model_base} \\
+  --served-model-name qwen3-vl-8b qwen38-9b \\
+  --host 127.0.0.1 \\
+  --port ${FAST_PORT} \\
+  --trust-remote-code \\
+  --enforce-eager \\
+${dtype_line}
+${quant_line}
+  --tensor-parallel-size 1 \\
+  --gpu-memory-util 0.90 \\
+  --max-model-len 49152 \\
+  --max-num-batched-tokens 8192 \\
+  --max-num-seqs 2 \\
+  --block-size 64 \\
+  --kv-cache-dtype fp8 \\
+  --limit-mm-per-prompt '{"image":4,"video":1}' \\
+  --mm-processor-cache-gb 0.5 \\
+  --mm-processor-kwargs '{"size":{"longest_edge":2073600,"shortest_edge":4096}}' \\
+  --enable-auto-tool-choice \\
+  --tool-call-parser hermes \\
+  --enable-prefix-caching
+EOF
+  chmod +x "$inner_fast"
+  log "starting Qwen3-VL-8B on GPU1 port $FAST_PORT  weights=$model_host"
+  dk run -d \
+    --name "$FAST_CONTAINER_NAME" \
+    --restart unless-stopped \
+    --no-healthcheck \
+    --privileged \
+    --net=host \
+    --device=/dev/dri \
+    --shm-size=16g \
+    -e ZE_AFFINITY_MASK=1 \
+    -e VLLM_WORKER_MULTIPROC_METHOD=spawn \
+    -v "${MODELS_DIR}:/models" \
+    -v "${inner_fast}:/teela-inner.sh:ro" \
+    --entrypoint /bin/bash \
+    "$FAST_IMAGE" \
+    /teela-inner.sh
+  log "waiting for http://127.0.0.1:${FAST_PORT}/v1/models"
+  local i
+  for i in $(seq 1 180); do
+    if curl -fsS "http://127.0.0.1:${FAST_PORT}/v1/models" >/dev/null 2>&1; then
+      log "Qwen3-VL-8B API is up"
+      return 0
+    fi
+    if ! dk ps --format '{{.Names}}' | grep -qx "$FAST_CONTAINER_NAME"; then
+      log "VL-8B container exited; last logs:"
+      dk logs --tail 80 "$FAST_CONTAINER_NAME" || true
+      return 1
+    fi
+    sleep 2
+  done
+  log "timed out waiting for VL-8B API"
+  dk logs --tail 80 "$FAST_CONTAINER_NAME" || true
+  return 1
+}
+
+# VRAM policy is vendor-neutral. 27B GPTQ-Int4 is ~18 GiB; Muse ~30B.
+# 8GB-class (RTX 5060, small Radeon) cannot load 27B even with TP=2.
+probe_gpus() {
+  N_GPU=0
+  MIN_MIB=0
+  case "$BACKEND" in
+    cuda)
+      N_GPU="$(nvidia-smi -L 2>/dev/null | wc -l | tr -d ' ')"
+      MIN_MIB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk 'BEGIN{m=999999} {gsub(/ /,"",$1); if($1+0<m && $1+0>0)m=$1+0} END{print m}')"
+      ;;
+    rocm)
+      local f m
+      MIN_MIB=999999
+      for f in /sys/class/drm/card*/device/mem_info_vram_total; do
+        [[ -r "$f" ]] || continue
+        m=$(($(cat "$f") / 1024 / 1024))
+        [[ "$m" -lt 512 ]] && continue
+        N_GPU=$((N_GPU + 1))
+        [[ "$m" -lt "$MIN_MIB" ]] && MIN_MIB="$m"
+      done
+      if [[ "$N_GPU" -lt 1 ]]; then
+        N_GPU="$(ls /dev/dri/renderD* 2>/dev/null | wc -l | tr -d ' ')"
+        MIN_MIB="${ROCM_VRAM_MIB:-8192}"
+      fi
+      ;;
+    *)
+      N_GPU="$(ls /dev/dri/card* 2>/dev/null | wc -l | tr -d ' ')"
+      MIN_MIB="${XPU_VRAM_MIB:-24576}"
+      ;;
+  esac
+}
+
+pick_vl8_weights() {
+  if [[ -f "$FAST_MODEL_FP8/config.json" ]]; then
+    MODEL_HOST="$FAST_MODEL_FP8"
+  elif [[ -f "$FAST_MODEL_BF16/config.json" ]]; then
+    MODEL_HOST="$FAST_MODEL_BF16"
+  else
+    die "Qwen3-VL-8B weights missing (tried $FAST_MODEL_BF16 and $FAST_MODEL_FP8)"
+  fi
+}
+
+# Shared by CUDA and ROCm. Intel XPU keeps the llm-scaler 27B recipe below.
+apply_fit_policy() {
+  if [[ "$BACKEND" == "cuda" ]]; then
+    IMAGE="${CUDA_IMAGE}"
+  else
+    IMAGE="${ROCM_IMAGE}"
+  fi
+  FAST_IMAGE="$IMAGE"
+  probe_gpus
+  log "$BACKEND gpus=${N_GPU:-0} min_vram_mib=${MIN_MIB:-0} image=$IMAGE"
+  [[ "${N_GPU:-0}" -ge 1 ]] || die "no $BACKEND GPUs visible"
+  if [[ "${MIN_MIB:-0}" -lt 14000 ]]; then
+    if [[ "$TARGET" == "muse" ]]; then
+      die "Muse Glimmer 30B does not fit ${MIN_MIB}MiB GPUs. Use: $0 qwen  (serves Qwen3-VL-8B)"
+    fi
+    if [[ "$TARGET" == "qwen" || "$TARGET" == "hybrid" ]]; then
+      log "8GB-class GPU ($BACKEND, ${MIN_MIB}MiB): Qwen 3.8 27B GPTQ (~18 GiB) cannot load. Serving Qwen3-VL-8B as qwen38 + qwen3-vl-8b."
+    fi
+    TARGET=vl8
+    pick_vl8_weights
+    SERVED="qwen3-vl-8b qwen38 qwen38-9b"
+    if [[ "${N_GPU}" -ge 2 ]]; then
+      TP="${TENSOR_PARALLEL_SIZE:-2}"
+      MAX_LEN="${VL8_MAX_LEN:-32768}"
+    else
+      TP=1
+      MAX_LEN="${VL8_MAX_LEN:-16384}"
+    fi
+    [[ "$TP" -gt "$N_GPU" ]] && TP="$N_GPU"
+  else
+    if [[ "$TARGET" == "qwen" || "$TARGET" == "hybrid" ]]; then
+      MAX_LEN="${QWEN_MAX_LEN:-65536}"
+      TP="${TENSOR_PARALLEL_SIZE:-2}"
+      [[ "$TP" -gt "$N_GPU" ]] && TP="$N_GPU"
+    fi
+    if [[ "$TARGET" == "muse" && "${MIN_MIB:-0}" -lt 22000 ]]; then
+      die "Muse Glimmer 30B needs ~24GB/GPU. This card is ${MIN_MIB}MiB. Use: $0 qwen"
+    fi
+  fi
+}
+
+apply_cuda_target() { apply_fit_policy; }
+
+inner_tp_boot() {
+  # Runtime clamp: vLLM's torch may see fewer GPUs than /dev/dri cards (Level Zero after a reset).
+  # One 24GB card cannot hold 27B GPTQ (~18 GiB) plus 262k KV; drop context and raise util.
+  printf '%s\n' "TP=$1" "MAX_LEN=$2" "GPU_UTIL=${3:-0.75}" '
+vis=$(python3 -c "import torch
+n=0
+try:
+    if hasattr(torch, '"'"'xpu'"'"') and torch.xpu.is_available():
+        n=int(torch.xpu.device_count())
+    elif hasattr(torch, '"'"'cuda'"'"') and torch.cuda.is_available():
+        n=int(torch.cuda.device_count())
+except Exception:
+    n=0
+print(n)" 2>/dev/null || echo 0)
+if [[ "$vis" =~ ^[0-9]+$ ]] && [[ "$vis" -ge 1 ]] && [[ $TP -gt $vis ]]; then
+  echo "[teela] visible GPUs=$vis < TP=$TP; using tensor-parallel-size $vis" >&2
+  TP=$vis
+  if [[ $TP -eq 1 ]]; then
+    if [[ $MAX_LEN -gt 32768 ]]; then
+      echo "[teela] single GPU: max-model-len $MAX_LEN -> 32768" >&2
+      MAX_LEN=32768
+    fi
+    GPU_UTIL=0.90
+    echo "[teela] single GPU: gpu-memory-util $GPU_UTIL" >&2
+  fi
+fi
+'
+}
+
+vllm_init_failed() {
+  local logs
+  logs="$(dk logs --tail 160 "$CONTAINER_NAME" 2>/dev/null || true)"
+  printf '%s' "$logs" | grep -Eiq \
+    'device index is out of range|Engine core initialization failed|WorkerProc failed to start|UR_RESULT_ERROR_DEVICE_LOST|No available memory for the cache blocks'
+}
+
+stop_failed_vllm() {
+  log "vLLM failed to initialize; last logs:"
+  dk logs --tail 80 "$CONTAINER_NAME" || true
+  dk update --restart no "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  dk stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+}
+
+wait_for_api() {
+  local i
+  log "container $CONTAINER_NAME started. waiting for http://${HOST}:${PORT}/v1/models"
+  for i in $(seq 1 180); do
+    if models="$(curl -fsS "http://${HOST}:${PORT}/v1/models" 2>/dev/null)"; then
+      log "API is up"
+      printf '%s\n' "$models"
+      return 0
+    fi
+    if vllm_init_failed; then
+      stop_failed_vllm
+      return 1
+    fi
+    if ! dk ps --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+      log "container exited; last logs:"
+      dk logs --tail 80 "$CONTAINER_NAME" || true
+      return 1
+    fi
+    sleep 5
+  done
+  log "timed out waiting for API; last logs:"
+  dk logs --tail 80 "$CONTAINER_NAME" || true
+  return 1
+}
+
+start_portable() {
+  local model_base inner_host vl_quant vl_dtype parser mm_limit run
+  model_base="$(basename "$MODEL_HOST")"
+  inner_host="$HERE/.inner.sh"
+  if ! dk image inspect "$IMAGE" >/dev/null 2>&1; then
+    log "pulling $IMAGE"
+    dk pull "$IMAGE"
+  fi
+  if dk ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+    log "stopping existing $CONTAINER_NAME"
+    dk rm -f "$CONTAINER_NAME" >/dev/null || true
+  fi
+  if dk ps -a --format '{{.Names}}' | grep -qx "$FAST_CONTAINER_NAME"; then
+    log "stopping $FAST_CONTAINER_NAME"
+    dk rm -f "$FAST_CONTAINER_NAME" >/dev/null || true
+  fi
+  vl_quant=""
+  vl_dtype="  --dtype auto \\"
+  parser="hermes"
+  mm_limit='{"image":2,"video":0}'
+  if [[ "$TARGET" == "vl8" && "$(basename "$MODEL_HOST")" != *FP8* ]]; then
+    vl_quant="  --quantization fp8 \\"
+    vl_dtype="  --dtype float16 \\"
+  fi
+  if [[ "$TARGET" == "qwen" || "$TARGET" == "hybrid" ]]; then
+    parser="qwen3_coder"
+    vl_quant=""
+    vl_dtype="  --dtype float16 \\"
+    mm_limit='{"image":2,"video":0}'
+  fi
+  if [[ "$TARGET" == "muse" ]]; then
+    parser="muse_glimmer"
+    vl_quant="  --quantization fp8 \\"
+    vl_dtype="  --dtype float16 \\"
+  fi
+  if [[ "$TARGET" == "serve" ]]; then
+    parser="qwen3_coder"
+    vl_quant=""
+    vl_dtype="  --dtype auto \\"
+  fi
+  cat >"$inner_host" <<EOF
+#!/bin/bash
+set -euo pipefail
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+child=""
+stopping=0
+term() {
+  stopping=1
+  if [[ -n "\$child" ]]; then
+    kill -TERM "\$child" 2>/dev/null || true
+    wait "\$child" 2>/dev/null || true
+  fi
+  exit 0
+}
+trap term TERM INT
+$(inner_tp_boot "$TP" "$MAX_LEN" "0.88")
+vllm serve \\
+  --model /models/${model_base} \\
+  --served-model-name ${SERVED} \\
+  --host ${HOST} \\
+  --port ${PORT} \\
+  --trust-remote-code \\
+${vl_dtype}
+${vl_quant}  --tensor-parallel-size \$TP \\
+  --gpu-memory-utilization \$GPU_UTIL \\
+  --max-model-len \$MAX_LEN \\
+  --max-num-batched-tokens 2048 \\
+  --max-num-seqs 1 \\
+  --enable-auto-tool-choice \\
+  --tool-call-parser ${parser} \\
+  --enable-prefix-caching \\
+  --limit-mm-per-prompt '${mm_limit}' &
+child=\$!
+set +e
+wait "\$child"
+status=\$?
+set -e
+if [[ "\$stopping" -eq 0 ]]; then
+  echo "[teela] vLLM exited \${status}; cooling GPUs 30s before restart" >&2
+  sleep 30
+fi
+exit "\$status"
+EOF
+  chmod +x "$inner_host"
+  log "starting $BACKEND $TARGET  image=$IMAGE  weights=$MODEL_HOST  served=$SERVED  tp=$TP  max-model-len=$MAX_LEN"
+  local run=(
+    dk run -d
+    --name "$CONTAINER_NAME"
+    --restart unless-stopped
+    --ipc=host
+    --net=host
+    --shm-size=16g
+    -e VLLM_WORKER_MULTIPROC_METHOD=spawn
+    -e ZE_FLAT_DEVICE_HIERARCHY=FLAT
+    -v "${MODELS_DIR}:/models"
+    -v "${inner_host}:/teela-inner.sh:ro"
+    --entrypoint /bin/bash
+  )
+  if [[ "$BACKEND" == "cuda" ]]; then
+    run+=(--gpus all -e NVIDIA_VISIBLE_DEVICES=all)
+  else
+    run+=(--device=/dev/kfd --device=/dev/dri --group-add video --security-opt seccomp=unconfined)
+  fi
+  run+=("$IMAGE" /teela-inner.sh)
+  "${run[@]}"
+  wait_for_api
+}
+
+start_cuda() { start_portable; }
+
+case "$TARGET" in
+  qwen|qwen38|qwen3.8)
+    TARGET=qwen
+    IMAGE="$QWEN_IMAGE"
+    MODEL_HOST="$QWEN_MODEL"
+    SERVED=qwen38
+    MAX_LEN="${QWEN_MAX_LEN:-262144}"
+    TP="${TENSOR_PARALLEL_SIZE:-2}"
+    ;;
+  hybrid|qwen-hybrid)
+    TARGET=hybrid
+    IMAGE="$QWEN_IMAGE"
+    MODEL_HOST="$QWEN_MODEL"
+    SERVED=qwen38
+    # One 24 GB B60: GPTQ ~17.6 GiB. 32k + 2×1080p images; default 16k visual tokens OOM.
+    MAX_LEN="${QWEN_MAX_LEN:-32768}"
+    TP=1
+    ;;
+  qwen9|qwen38-9b|9b)
+    TARGET=qwen9
+    ;;
+  qwen3-vl-8b|vl8|qwen-vl)
+    TARGET=vl8
+    IMAGE="$FAST_IMAGE"
+    if [[ -f "$FAST_MODEL_BF16/config.json" ]]; then
+      MODEL_HOST="$FAST_MODEL_BF16"
+    elif [[ -f "$FAST_MODEL_FP8/config.json" ]]; then
+      MODEL_HOST="$FAST_MODEL_FP8"
+    else
+      die "Qwen3-VL-8B weights missing (tried $FAST_MODEL_BF16 and $FAST_MODEL_FP8)"
+    fi
+    SERVED=qwen3-vl-8b
+    MAX_LEN="${VL8_MAX_LEN:-262144}"
+    TP="${TENSOR_PARALLEL_SIZE:-2}"
+    ;;
+  muse|muse-glimmer|glimmer)
+    TARGET=muse
+    IMAGE="$MUSE_IMAGE"
+    MODEL_HOST="$MUSE_MODEL"
+    SERVED=muse-glimmer
+    MAX_LEN="${MUSE_MAX_LEN:-131072}"
+    TP="${TENSOR_PARALLEL_SIZE:-2}"
+    ;;
+  serve)
+    [[ -n "${2:-}" ]] || die "usage: $0 serve /path/to/weights served_name"
+    MODEL_HOST="$2"
+    SERVED="${3:-$(basename "$2")}"
+    MAX_LEN="${SERVE_MAX_LEN:-32768}"
+    TP="${TENSOR_PARALLEL_SIZE:-1}"
+    if [[ "$BACKEND" == "cuda" ]]; then
+      IMAGE="$CUDA_IMAGE"
+      TARGET=serve
+    elif [[ "$BACKEND" == "rocm" ]]; then
+      IMAGE="$ROCM_IMAGE"
+      TARGET=serve
+    else
+      IMAGE="$QWEN_IMAGE"
+      TARGET=qwen
+    fi
+    ;;
+  *)
+    die "usage: $0 qwen|muse|hybrid|qwen9|vl8|serve <weights_dir> <served_name>"
+    ;;
+esac
+
+if [[ "$BACKEND" == "cuda" || "$BACKEND" == "rocm" ]]; then
+  if [[ "$TARGET" == "serve" ]]; then
+    :
+  else
+    apply_fit_policy
+  fi
+fi
+
+if [[ "$TARGET" == "qwen9" ]]; then
+  start_fast_9b
+  exit $?
+fi
+
+[[ -d "$MODEL_HOST" ]] || die "weights missing: $MODEL_HOST"
+if [[ "${1}" != "serve" ]]; then
+  [[ -f "$MODEL_HOST/config.json" ]] || die "no config.json in $MODEL_HOST"
+  [[ -f "$MODEL_HOST/model.safetensors.index.json" ]] || die "incomplete weights (no model.safetensors.index.json): $MODEL_HOST"
+fi
+
+MODEL_BASE="$(basename "$MODEL_HOST")"
+MODEL_CTR="/models/${MODEL_BASE}"
+INNER_HOST="$HERE/.inner.sh"
+
+if [[ "$BACKEND" == "cuda" || "$BACKEND" == "rocm" ]]; then
+  start_portable
+  exit $?
+fi
+
+if ! dk image inspect "$IMAGE" >/dev/null 2>&1; then
+  log "pulling $IMAGE"
+  dk pull "$IMAGE"
+fi
+
+if dk ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+  log "stopping existing $CONTAINER_NAME"
+  dk rm -f "$CONTAINER_NAME" >/dev/null || true
+fi
+if [[ "$TARGET" != "hybrid" ]] && dk ps -a --format '{{.Names}}' | grep -qx "$FAST_CONTAINER_NAME"; then
+  log "stopping $FAST_CONTAINER_NAME (exclusive GPU job)"
+  dk rm -f "$FAST_CONTAINER_NAME" >/dev/null || true
+fi
+
+# GPTQ is auto-detected from config.json — do not pass --quantization for Qwen.
+if [[ "$TARGET" == "vl8" ]]; then
+  VL_QUANT=""
+  VL_DTYPE="  --dtype float16 \\"
+  if [[ "$(basename "$MODEL_HOST")" == *FP8* ]]; then
+    VL_DTYPE="  --dtype auto \\"
+  else
+    VL_QUANT="  --quantization fp8 \\"
+  fi
+  cat >"$INNER_HOST" <<EOF
+#!/bin/bash
+set -euo pipefail
+export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+$(inner_tp_boot "$TP" "$MAX_LEN" "0.90")
+child=""
+stopping=0
+term() {
+  stopping=1
+  if [[ -n "\$child" ]]; then
+    kill -TERM "\$child" 2>/dev/null || true
+    wait "\$child" 2>/dev/null || true
+  fi
+  exit 0
+}
+trap term TERM INT
+vllm serve \\
+  --model ${MODEL_CTR} \\
+  --served-model-name qwen3-vl-8b qwen38-9b \\
+  --host ${HOST} \\
+  --port ${PORT} \\
+  --trust-remote-code \\
+  --enforce-eager \\
+${VL_DTYPE}
+${VL_QUANT}
+  --tensor-parallel-size \$TP \\
+  --gpu-memory-util \$GPU_UTIL \\
+  --max-model-len \$MAX_LEN \\
+  --max-num-batched-tokens 8192 \\
+  --max-num-seqs 2 \\
+  --block-size 64 \\
+  --kv-cache-dtype fp8 \\
+  --limit-mm-per-prompt '{"image":4,"video":1}' \\
+  --mm-processor-cache-gb 0.5 \\
+  --mm-processor-kwargs '{"size":{"longest_edge":2073600,"shortest_edge":4096}}' \\
+  --enable-auto-tool-choice \\
+  --tool-call-parser hermes \\
+  --enable-prefix-caching &
+child=\$!
+set +e
+wait "\$child"
+status=\$?
+set -e
+if [[ "\$stopping" -eq 0 ]]; then
+  echo "[teela] vLLM exited \${status}; cooling Intel GPUs 30s before restart" >&2
+  sleep 30
+fi
+exit "\$status"
+EOF
+elif [[ "$TARGET" == "qwen" || "$TARGET" == "hybrid" ]]; then
+  if [[ "$TARGET" == "hybrid" ]]; then
+    MM_LIMIT='{"image":2,"video":0}'
+    GPU_UTIL=0.90
+    MAX_SEQS=1
+    MAX_BATCHED=4096
+    MM_TAIL=$'  --mm-processor-cache-gb 0.5 \\\n  --mm-processor-kwargs \'{"size":{"longest_edge":2073600,"shortest_edge":4096}}\' \\\n'
+  else
+    # TP=2 27B + 4 images + 2 seqs OOMs the Arc B60s (DEVICE_LOST / OUT_OF_RESOURCES).
+    MM_LIMIT='{"image":2,"video":0}'
+    GPU_UTIL=0.75
+    MAX_SEQS=1
+    MAX_BATCHED=4096
+    MM_TAIL=""
+  fi
+  cat >"$INNER_HOST" <<EOF
+#!/bin/bash
+set -euo pipefail
+export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+# GPTQ layers expose qweight, not weight. FP8 ESIMD GDN fast paths crash otherwise.
+export DISABLE_ESIMD_GDN_OUTPROJ=1
+export DISABLE_ESIMD_GDN_PROJ=1
+export DISABLE_ESIMD_GDN_CONV=1
+child=""
+stopping=0
+term() {
+  stopping=1
+  if [[ -n "\$child" ]]; then
+    kill -TERM "\$child" 2>/dev/null || true
+    wait "\$child" 2>/dev/null || true
+  fi
+  exit 0
+}
+trap term TERM INT
+$(inner_tp_boot "$TP" "$MAX_LEN" "${GPU_UTIL:-0.75}")
+vllm serve \\
+  --model ${MODEL_CTR} \\
+  --served-model-name ${SERVED} \\
+  --host ${HOST} \\
+  --port ${PORT} \\
+  --dtype float16 \\
+  --mamba-ssm-cache-dtype float16 \\
+  --enforce-eager \\
+  --trust-remote-code \\
+  --limit-mm-per-prompt '${MM_LIMIT}' \\
+  --tensor-parallel-size \$TP \\
+  --gpu-memory-util \$GPU_UTIL \\
+  --max-model-len \$MAX_LEN \\
+  --max-num-batched-tokens ${MAX_BATCHED} \\
+  --max-num-seqs ${MAX_SEQS} \\
+  --block-size 64 \\
+  --kv-cache-dtype fp8 \\
+${MM_TAIL}  --enable-prefix-caching \\
+  --enable-auto-tool-choice \\
+  --tool-call-parser qwen3_coder \\
+  --reasoning-parser qwen3 &
+child=\$!
+set +e
+wait "\$child"
+status=\$?
+set -e
+if [[ "\$stopping" -eq 0 ]]; then
+  echo "[teela] vLLM exited \${status}; cooling Intel GPUs 30s before restart" >&2
+  sleep 30
+fi
+exit "\$status"
+EOF
+else
+  MM_FLAG='--limit-mm-per-prompt '\''{"image":4,"video":0}'\'''
+  PREP=""
+  if [[ "$MUSE_MULTIMODAL" == "0" ]]; then
+    MM_FLAG='--limit-mm-per-prompt '\''{"image":0,"video":0}'\'''
+  else
+    PREP="pip install --no-cache-dir transformers==5.15.0"$'\n'
+  fi
+  cat >"$INNER_HOST" <<EOF
+#!/bin/bash
+set -euo pipefail
+export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+$(inner_tp_boot "$TP" "$MAX_LEN" "0.85")
+${PREP}exec vllm serve \\
+  --model ${MODEL_CTR} \\
+  --served-model-name ${SERVED} \\
+  --host ${HOST} \\
+  --port ${PORT} \\
+  --quantization fp8 \\
+  --dtype float16 \\
+  --mamba-ssm-cache-dtype float16 \\
+  --enforce-eager \\
+  --trust-remote-code \\
+  --tensor-parallel-size \$TP \\
+  --gpu-memory-util \$GPU_UTIL \\
+  --max-model-len \$MAX_LEN \\
+  --max-num-batched-tokens 8192 \\
+  --max-num-seqs 8 \\
+  --block-size 64 \\
+  --attention-backend FLASH_ATTN \\
+  --chat-template ${MODEL_CTR}/chat_template.jinja \\
+  --enable-auto-tool-choice \\
+  --tool-call-parser muse_glimmer \\
+  --reasoning-parser muse_glimmer \\
+  --no-enable-prefix-caching \\
+  ${MM_FLAG}
+EOF
+fi
+chmod +x "$INNER_HOST"
+
+log "starting $TARGET  image=$IMAGE  weights=$MODEL_HOST  served=$SERVED  tp=$TP  max-model-len=$MAX_LEN"
+DOCKER_ENV=(
+  -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+  -e VLLM_WORKER_MULTIPROC_METHOD=spawn
+  -e ZE_FLAT_DEVICE_HIERARCHY=FLAT
+)
+if [[ "$TARGET" == "qwen" || "$TARGET" == "hybrid" ]]; then
+  DOCKER_ENV+=(
+    -e DISABLE_ESIMD_GDN_OUTPROJ=1
+    -e DISABLE_ESIMD_GDN_PROJ=1
+    -e DISABLE_ESIMD_GDN_CONV=1
+  )
+fi
+if [[ "$TP" == "1" ]]; then
+  DOCKER_ENV+=(-e ZE_AFFINITY_MASK=0)
+fi
+
+dk run -d \
+  --name "$CONTAINER_NAME" \
+  --restart unless-stopped \
+  --privileged \
+  --net=host \
+  --device=/dev/dri \
+  --shm-size=32g \
+  -v "${MODELS_DIR}:/models" \
+  -v "${INNER_HOST}:/teela-inner.sh:ro" \
+  "${DOCKER_ENV[@]}" \
+  --entrypoint /bin/bash \
+  "$IMAGE" \
+  /teela-inner.sh
+
+log "container $CONTAINER_NAME started. waiting for http://${HOST}:${PORT}/v1/models"
+if [[ "$TARGET" == "hybrid" ]]; then
+  # 9B is on GPU1; do not wait for 27B first or a TP=1 crash leaves MiniOS with nothing.
+  start_fast_9b || log "9B failed to start; hybrid will use 27B only if it comes up"
+fi
+for _ in $(seq 1 180); do
+  if models="$(curl -fsS "http://${HOST}:${PORT}/v1/models" 2>/dev/null)"; then
+    log "API is up"
+    printf '%s\n' "$models"
+    exit 0
+  fi
+  if vllm_init_failed; then
+    stop_failed_vllm
+    exit 1
+  fi
+  if ! dk ps --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+    log "container exited; last logs:"
+    dk logs --tail 80 "$CONTAINER_NAME" || true
+    if [[ "$TARGET" == "hybrid" ]] && curl -fsS "http://127.0.0.1:${FAST_PORT}/v1/models" >/dev/null 2>&1; then
+      log "27B died; Qwen3-VL-8B is still up on :${FAST_PORT}"
+      exit 0
+    fi
+    exit 1
+  fi
+  sleep 5
+done
+
+log "timed out waiting for API; last logs:"
+dk logs --tail 80 "$CONTAINER_NAME" || true
+exit 1

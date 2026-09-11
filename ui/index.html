@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Grok Desk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Ubuntu:wght@300;400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/grokbot.css?v=81" />
+  <link rel="stylesheet" href="/styles.css?v=71" />
+  <link rel="stylesheet" href="/vendor/xterm.css" />
+</head>
+<body>
+  <script>
+    (function () {
+      if (new URLSearchParams(location.search).get("observe")) {
+        document.body.classList.add("observer-mode");
+      }
+    })();
+  </script>
+  <div id="scrim" hidden></div>
+  <div id="app" class="app-shell">
+    <div id="layoutBackdrop" class="layout-backdrop"></div>
+
+    <aside id="hallway" class="sidebar">
+      <div class="sidebar-top">
+        <div class="sidebar-actions">
+          <button id="hallway-close" class="icon-btn" type="button" title="Hide bots">‹</button>
+          <button id="new-bot" class="icon-btn add-agent" type="button" title="Create agent">+</button>
+        </div>
+        <div class="search-wrap">
+          <span class="search-icon">⌕</span>
+          <input id="search" type="search" placeholder="Search" autocomplete="off" />
+        </div>
+        <p id="peer-hint" class="peer-hint" hidden></p>
+      </div>
+      <div id="roster" class="agent-list"></div>
+      <div class="sidebar-bottom">
+        <button type="button" class="bottom-row" id="plugins-btn"><span>🔌</span><span>Plugins</span></button>
+        <button type="button" class="bottom-row" id="user-btn">
+          <span id="profileInitials" class="profile-dot">R</span>
+          <span id="profileDisplayName">User</span>
+        </button>
+      </div>
+    </aside>
+
+    <div id="left-resizer" class="panel-resizer left-resizer" title="Drag to resize bots"></div>
+
+    <main id="conversation" class="chat-column">
+      <header class="chat-header pane-head conv-head">
+        <div class="header-left-group">
+          <button id="mobile-back-agents" class="icon-btn mobile-only mobile-back-btn" type="button" title="Back to agents">‹</button>
+          <button id="nav-toggle" class="icon-btn header-toggle" type="button" title="Show bots">›</button>
+          <div class="selected-agent" id="edit-agent-header" title="Edit this bot">
+            <div id="headerAvatar" class="mini-avatar" data-state="idle"></div>
+            <div class="conv-id">
+              <div id="conv-name" class="header-name">Select a bot</div>
+              <div id="conv-status" class="header-status muted">Empty hallway</div>
+            </div>
+          </div>
+        </div>
+        <div class="conv-actions header-actions">
+          <button id="mobile-open-workspace" class="icon-btn mobile-only" type="button" title="Open workspace">▣</button>
+          <div class="more-picker">
+            <button id="more-btn" type="button" title="Chat actions">⋯</button>
+            <div id="more-menu" hidden>
+              <ul>
+                <li class="menu-heading">Desk</li>
+                <li><button type="button" id="menu-plugins">Plugins</button></li>
+                <li><button type="button" id="menu-settings">Profile settings</button></li>
+                <li class="menu-sep" aria-hidden="true"></li>
+                <li class="menu-heading more-bot-only">Export</li>
+                <li class="more-bot-only"><button type="button" data-fmt="system">System zip</button></li>
+                <li class="more-bot-only"><button type="button" data-fmt="json">Grok Desk JSON</button></li>
+                <li class="more-bot-only"><button type="button" data-fmt="md">Markdown</button></li>
+                <li class="more-bot-only"><button type="button" data-fmt="chatgpt">ChatGPT</button></li>
+                <li class="more-bot-only"><button type="button" data-fmt="claude">Claude</button></li>
+                <li class="more-bot-only"><button type="button" data-fmt="openai">OpenAI messages</button></li>
+                <li class="more-bot-only"><button type="button" data-fmt="grok">Grok / xAI</button></li>
+                <li class="menu-sep more-bot-only" aria-hidden="true"></li>
+                <li class="more-bot-only"><button type="button" id="edit-agent">Edit agent</button></li>
+                <li class="more-bot-only"><button type="button" id="edit-soul">SOUL</button></li>
+              </ul>
+            </div>
+          </div>
+          <input id="import-file" type="file" accept=".json,.jsonl,.md,.txt,.zip,application/json,application/zip,text/markdown,text/plain" hidden />
+          <button id="theme-toggle" class="icon-btn" type="button" title="Switch theme">◐</button>
+          <button id="screen-open" class="icon-btn" type="button" title="Show workspace">‹</button>
+        </div>
+      </header>
+
+      <nav id="agentIconRail" class="agent-icon-rail" aria-label="Agents"></nav>
+
+      <div class="chat-timeline-bar">
+        <button id="timeline-toggle" class="timeline-toggle" type="button" title="Show older chats">⧖ <span>Timeline</span></button>
+        <div class="active-chat-meta">
+          <div id="active-chat-title" class="active-chat-title">Current chat</div>
+          <div id="active-chat-when" class="active-chat-when">Select a bot to see its chats</div>
+        </div>
+        <button id="new-chat-btn" class="new-chat-btn" type="button" title="Start a new chat" disabled>＋ <span>New chat</span></button>
+      </div>
+
+      <div id="horizon-bar" class="horizon-bar" hidden>
+        <button type="button" id="horizon-toggle" class="horizon-toggle" aria-expanded="false">
+          <span class="horizon-chevron" aria-hidden="true">▸</span>
+          <span class="horizon-kicker">Long Horizon Task</span>
+          <span id="horizon-summary" class="horizon-summary"></span>
+          <span id="horizon-progress" class="horizon-progress"></span>
+        </button>
+        <ul id="horizon-list" class="horizon-list" hidden></ul>
+      </div>
+
+      <div class="chat-body">
+        <aside id="chat-timeline-panel" class="chat-timeline-panel" aria-label="Older chats">
+          <div class="timeline-panel-header">
+            <h3>Older chats</h3>
+            <button id="close-timeline-panel" class="icon-btn" type="button" title="Close timeline">×</button>
+          </div>
+          <div class="timeline-search">
+            <input id="timeline-search" type="search" placeholder="Search this agent's chats" autocomplete="off" />
+          </div>
+          <div id="timeline-list" class="timeline-list"></div>
+        </aside>
+        <section id="transcript" class="chat-scroll messages">
+          <div class="time-divider" id="chat-clock"></div>
+        </section>
+        <button id="jump-latest" class="jump-latest" type="button" title="Jump to latest" aria-label="Jump to latest" aria-hidden="true" tabindex="-1">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M6.7 9.3a1 1 0 0 1 1.4 0L12 13.17 15.9 9.3a1 1 0 1 1 1.4 1.4l-4.6 4.6a1 1 0 0 1-1.4 0l-4.6-4.6a1 1 0 0 1 0-1.4z"/></svg>
+        </button>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer-statusbar" id="composer-meta" hidden>
+          <div class="composer-status-left">
+            <button id="undo" class="status-action" type="button" disabled title="Undo last turn (/undo). Kept in the log, not in export.">↶ <span>Undo</span></button>
+            <div class="model-select-wrap">
+              <span>Model</span>
+              <button type="button" id="model-select-btn" class="model-select-btn" aria-haspopup="listbox" aria-expanded="false">
+                <span id="model-select-label">Model</span>
+              </button>
+              <select id="model-select" hidden aria-hidden="true"></select>
+              <div id="model-menu" hidden></div>
+            </div>
+            <div class="model-picker" hidden>
+              <button type="button" id="meta-model" title="Switch model">— ▴</button>
+            </div>
+          </div>
+          <div class="runtime-stats">
+            <div class="context-stat" title="Live conversation context">
+              <span class="stat-label">Context</span>
+              <strong id="context-usage">0 / 0</strong>
+              <div class="context-meter"><span id="context-meter-fill"></span></div>
+            </div>
+            <div class="tps-stat" title="Generation throughput">
+              <span class="stat-dot"></span>
+              <strong id="tps-counter">0.0</strong>
+              <span>tok/s</span>
+            </div>
+          </div>
+        </div>
+        <div id="paste-tray" class="attachment-tray" hidden></div>
+        <div id="slash-menu" class="slash-menu" hidden role="listbox" aria-label="Slash commands"></div>
+        <div id="check-confirm" class="gb-ask" hidden role="dialog" aria-labelledby="check-confirm-q">
+          <div class="gb-ask-head">Question</div>
+          <p id="check-confirm-q">Which did you mean?</p>
+          <div id="check-confirm-actions" class="gb-ask-rows" role="listbox"></div>
+          <div class="gb-ask-foot">↑↓ move · 1–9 select · Enter · z other · Esc dismiss</div>
+        </div>
+        <form id="composer" class="composer">
+          <label id="attach-btn" class="round-btn attach-wrap" title="Attach image or video" aria-label="Attach image or video">
+            <span class="attach-icon" aria-hidden="true">＋</span>
+            <input id="file-input" type="file" accept="image/*,video/*,.heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mp4,.mov,.m4v" multiple />
+          </label>
+          <textarea id="message" rows="1" placeholder="Message…" disabled></textarea>
+          <button type="button" id="voice-toggle" class="round-btn voice-btn off" title="Voice muted. Tap to enable." aria-label="Toggle voice output">
+            <svg class="btn-icon icon-speaker-on" viewBox="0 0 24 24" aria-hidden="true" hidden>
+              <path fill="currentColor" d="M4 9v6h3.2L12 19.2V4.8L7.2 9H4z"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M15.4 9.2a3.6 3.6 0 0 1 0 5.6M18.2 7a6.4 6.4 0 0 1 0 10"/>
+            </svg>
+            <svg class="btn-icon icon-speaker-off" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M4 9v6h3.2L12 19.2V4.8L7.2 9H4z"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M16 9.5 21 14.5M21 9.5 16 14.5"/>
+            </svg>
+          </button>
+          <button type="button" id="mic" class="round-btn mic-btn" title="Voice chat — tap once, then just talk. Pause to send." aria-label="Start voice chat" aria-pressed="false" disabled>
+            <svg class="btn-icon icon-mic" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v3.5M8.5 20.5h7"/>
+            </svg>
+            <span class="stop-icon icon-mic-stop" hidden></span>
+          </button>
+          <button type="submit" id="send" class="send-btn" disabled aria-label="Send">➤</button>
+        </form>
+      </div>
+    </main>
+
+    <div id="screen-resizer" class="panel-resizer right-resizer" role="separator" aria-orientation="vertical" title="Drag to resize workspace"></div>
+
+    <section id="screen" class="workspace-column">
+      <header class="workspace-header">
+        <button id="mobile-back-chat" class="mobile-workspace-back mobile-only" type="button">‹ Chat</button>
+        <button id="screen-toggle" class="icon-btn back-btn" type="button" title="Hide workspace">›</button>
+        <div class="conv-id">
+          <div id="screen-title">Workspace</div>
+          <div id="screen-sub" class="muted">The bot’s computer</div>
+        </div>
+        <div class="workspace-actions">
+          <button type="button" class="icon-btn" id="workspace-plugins" title="Plugins">🔌</button>
+          <button type="button" class="icon-btn" id="workspace-settings" title="User &amp; Grok Build Settings">⚙</button>
+          <button type="button" class="icon-btn" id="workspace-close" title="Close workspace">×</button>
+        </div>
+      </header>
+
+      <div id="control-banner" hidden></div>
+
+      <div class="workspace-body v7-workspace-body">
+        <section class="right-section live-desktop-section">
+          <div class="right-section-header">
+            <div>
+              <div class="right-section-kicker">AGENT DESKTOP</div>
+            </div>
+            <div class="section-actions">
+              <button id="takeover" class="mini-icon-btn takeover-btn" type="button" hidden title="Take over the live screen">Take Over</button>
+              <button id="desktop-fullscreen" class="mini-icon-btn" type="button" title="Enter Live Desktop">⛶</button>
+              <button id="workspace-collapse" class="mini-icon-btn" type="button" title="Hide workspace">›</button>
+            </div>
+          </div>
+
+          <div id="computer">
+            <div id="ubuntuDesktopViewer" class="ubuntu-desktop-viewer" tabindex="0">
+              <button id="live-desktop-exit" class="live-desktop-exit" type="button" title="Exit Live Desktop">Exit Live Desktop</button>
+              <div id="takeover-toolbar" class="takeover-toolbar">
+                <div class="takeover-title">
+                  <span class="desktop-status-dot connected"></span>
+                  <strong id="takeover-agent-name">Ubuntu Desktop</strong>
+                  <span class="takeover-hint">Interactive session</span>
+                </div>
+                <div class="takeover-actions">
+                  <button id="takeover-esc" type="button" class="takeover-key">Esc</button>
+                  <button id="im-done" type="button" class="takeover-exit" hidden>Exit Take Over</button>
+                </div>
+              </div>
+              <div id="os-boot" class="os-boot" hidden>
+                <div class="boot-logo" aria-hidden="true">
+                  <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="none" stroke="#E95420" stroke-width="3"/><circle cx="32" cy="10" r="5" fill="#E95420"/><circle cx="12" cy="42" r="5" fill="#E95420"/><circle cx="52" cy="42" r="5" fill="#E95420"/></svg>
+                </div>
+                <div class="boot-dots"><span></span><span></span><span></span><span></span><span></span></div>
+              </div>
+              <div id="os-login" class="os-login" hidden>
+                <div class="login-clock" id="os-login-clock">00:00</div>
+                <div class="login-date" id="os-login-date">—</div>
+                <div class="os-login-avatar" id="os-login-avatar">U</div>
+                <div class="login-name" id="os-login-name">Bot</div>
+                <div class="login-pass">
+                  <input id="os-login-pass" type="password" placeholder="Password" autocomplete="off" hidden />
+                  <button id="os-login-btn" type="button">Sign In</button>
+                  <div class="login-error" id="os-login-error" hidden>Wrong password</div>
+                  <div class="login-hint" id="os-login-hint" hidden></div>
+                </div>
+              </div>
+              <div class="ubuntu-topbar">
+                <div class="ubuntu-top-left">
+                  <span id="task-clock" class="ubuntu-clock">Thu 12:00 AM</span>
+                </div>
+                <div class="ubuntu-top-right">
+                  <span class="ubuntu-sys-icons" title="Network">◌</span>
+                  <button type="button" id="os-power-btn" class="os-power-btn" title="Restart session">⏻</button>
+                </div>
+              </div>
+
+              <div id="preview" class="ubuntu-desktop-area dock-edge-left" data-wallpaper="1">
+                <div class="ubuntu-wallpaper-glow"></div>
+                <button type="button" id="desktop-trash" class="desktop-trash" title="Trash">
+                  <span class="desktop-trash-glyph">🗑</span>
+                  <span>Trash</span>
+                </button>
+
+                <div id="desktopWindows" class="desktop-windows" aria-label="Ubuntu application windows">
+                  <section class="desktop-window app-window hidden-window" data-window-app="grok" data-surface="tui" data-open="false"
+                           style="left:70px; top:10px; width:calc(100% - 88px); height:calc(100% - 48px); z-index:14;">
+                    <div class="desktop-window-titlebar window-drag-handle">
+                      <div class="window-title-left">
+                        <span class="window-app-dot grok-dot"></span>
+                        <strong>Grok Build TUI</strong>
+                      </div>
+                      <div class="window-controls">
+                        <button type="button" class="win-btn close" data-window-action="close" title="Close"></button>
+                        <button type="button" class="win-btn min" data-window-action="minimize" title="Minimize"></button>
+                        <button type="button" class="win-btn max" data-window-action="maximize" title="Maximize"></button>
+                      </div>
+                    </div>
+                    <div class="desktop-window-content grok-tui-window">
+                      <div class="grok-tui-header">
+                        <span>GROK BUILD</span>
+                        <span id="grok-tui-model">—</span>
+                      </div>
+                      <div id="tui-frame" class="surface is-on live-term-host" data-surface="tui">
+                        <div id="tui-term" class="term"></div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="desktop-window app-window hidden-window" data-window-app="browser" data-surface="browser" data-open="false"
+                           style="left:62px; top:22px; width:calc(100% - 80px); height:calc(100% - 58px); z-index:13;">
+                    <div class="desktop-window-titlebar window-drag-handle">
+                      <div class="window-title-left">
+                        <span class="window-app-dot browser-dot"></span>
+                        <strong>Firefox — Agent Browser</strong>
+                      </div>
+                      <div class="window-controls">
+                        <button type="button" class="win-btn close" data-window-action="close" title="Close"></button>
+                        <button type="button" class="win-btn min" data-window-action="minimize" title="Minimize"></button>
+                        <button type="button" class="win-btn max" data-window-action="maximize" title="Maximize"></button>
+                      </div>
+                    </div>
+                    <div class="desktop-window-content desktop-browser-window">
+                      <div id="chrome-window" class="surface is-on" data-surface="browser">
+                        <div class="chrome-bar desktop-browser-toolbar">
+                          <button type="button" id="browser-back" class="browser-back" title="Back">‹</button>
+                          <button type="button" id="browser-reload" class="browser-reload" title="Reload">↻</button>
+                          <form id="url-form" class="desktop-browser-form" novalidate>
+                            <input id="url-bar" class="desktop-browser-address-input" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Search or type a URL" />
+                            <button type="submit" class="browser-go">Go</button>
+                          </form>
+                        </div>
+                        <div id="browser-stage">
+                          <img id="browser-frame" alt="Bot browser" draggable="false" />
+                          <div id="browser-hit" tabindex="0" title="Click the page to type into it"></div>
+                          <textarea id="browser-keys" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" tabindex="0" aria-label="Type into the live page"></textarea>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="desktop-window app-window hidden-window" data-window-app="files" data-surface="desktop" data-open="false"
+                           style="left:76px; top:34px; width:calc(100% - 96px); height:calc(100% - 68px); z-index:12;">
+                    <div class="desktop-window-titlebar window-drag-handle">
+                      <div class="window-title-left">
+                        <span class="window-app-dot files-dot"></span>
+                        <strong>Files</strong>
+                      </div>
+                      <div class="window-controls">
+                        <button type="button" class="win-btn close" data-window-action="close" title="Close"></button>
+                        <button type="button" class="win-btn min" data-window-action="minimize" title="Minimize"></button>
+                        <button type="button" class="win-btn max" data-window-action="maximize" title="Maximize"></button>
+                      </div>
+                    </div>
+                    <div class="desktop-window-content desktop-files-window">
+                      <div class="files-wrap">
+                        <div class="files-sidebar" id="files-sidebar">
+                          <button type="button" data-file-place="" class="active">📁 Home</button>
+                          <button type="button" data-file-place="Desktop">📁 Desktop</button>
+                          <button type="button" data-file-place="Documents">📁 Documents</button>
+                          <button type="button" data-file-place="Downloads">📁 Downloads</button>
+                          <button type="button" data-file-place="Pictures">📁 Pictures</button>
+                          <button type="button" data-file-place="Music">📁 Music</button>
+                          <button type="button" data-file-place="Videos">📁 Videos</button>
+                          <button type="button" data-file-place="Trash">🗑 Trash</button>
+                        </div>
+                        <div class="files-main">
+                          <div class="files-toolbar">
+                            <div id="desktop-files-path" class="files-path">~</div>
+                            <button id="empty-trash-btn" type="button" class="files-empty-trash" hidden>Empty Trash</button>
+                          </div>
+                          <div id="desktop-frame" class="surface is-on" data-surface="desktop">
+                            <div id="desktop-icons" class="files-grid"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="desktop-window app-window hidden-window" data-window-app="terminal" data-surface="shell" data-open="false"
+                           style="left:88px; top:44px; width:calc(100% - 108px); height:calc(100% - 76px); z-index:11;">
+                    <div class="desktop-window-titlebar window-drag-handle">
+                      <div class="window-title-left">
+                        <span class="window-app-dot terminal-dot"></span>
+                        <strong>Terminal</strong>
+                      </div>
+                      <div class="window-controls">
+                        <button type="button" class="win-btn close" data-window-action="close" title="Close"></button>
+                        <button type="button" class="win-btn min" data-window-action="minimize" title="Minimize"></button>
+                        <button type="button" class="win-btn max" data-window-action="maximize" title="Maximize"></button>
+                      </div>
+                    </div>
+                    <div class="desktop-window-content desktop-terminal-window">
+                      <div id="shell-frame" class="surface is-on live-term-host" data-surface="shell">
+                        <div id="shell-term" class="term"></div>
+                      </div>
+                    </div>
+                  </section>
+
+
+                  <section class="desktop-window app-window hidden-window" data-window-app="editor" data-surface="editor" data-open="false"
+                           style="left:54px; top:18px; width:calc(100% - 76px); height:calc(100% - 56px); z-index:10;">
+                    <div class="desktop-window-titlebar window-drag-handle">
+                      <div class="window-title-left">
+                        <span class="window-app-dot editor-dot"></span>
+                        <strong>Code Editor — Workspace</strong>
+                      </div>
+                      <div class="window-controls">
+                        <button type="button" class="win-btn close" data-window-action="close" title="Close"></button>
+                        <button type="button" class="win-btn min" data-window-action="minimize" title="Minimize"></button>
+                        <button type="button" class="win-btn max" data-window-action="maximize" title="Maximize"></button>
+                      </div>
+                    </div>
+                    <div class="desktop-window-content minios-editor-window">
+                      <aside id="editor-file-list" class="minios-editor-files"><div class="minios-empty">Select a bot</div></aside>
+                      <div class="minios-editor-main">
+                        <div class="minios-editor-toolbar">
+                          <span id="editor-path">No file selected</span>
+                          <div>
+                            <button id="editor-preview" type="button" class="mini-dev-btn" disabled>Preview</button>
+                            <button id="editor-save" type="button" class="mini-dev-btn primary" disabled>Save</button>
+                          </div>
+                        </div>
+                        <textarea id="code-editor" class="minios-code-editor" spellcheck="false" placeholder="Choose a text/code file from the workspace…" disabled></textarea>
+                        <div id="editor-status" class="minios-editor-status">The editor reads and writes the bot's real workspace files.</div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="desktop-window app-window hidden-window" data-window-app="notepad" data-open="false"
+                           style="left:86px; top:22px; width:min(680px, calc(100% - 108px)); height:min(540px, calc(100% - 68px)); z-index:14;">
+                    <div class="desktop-window-titlebar window-drag-handle">
+                      <div class="window-title-left">
+                        <span class="window-app-dot notepad-dot"></span>
+                        <strong id="notepad-title">Text Editor — Untitled</strong>
+                      </div>
+                      <div class="window-controls">
+                        <button type="button" class="win-btn close" data-window-action="close" title="Close"></button>
+                        <button type="button" class="win-btn min" data-window-action="minimize" title="Minimize"></button>
+                        <button type="button" class="win-btn max" data-window-action="maximize" title="Maximize"></button>
+                      </div>
+                    </div>
+                    <div class="desktop-window-content notepad-window">
+                      <div class="notepad-chrome">
+                        <div class="notepad-menubar" id="notepad-menubar">
+                          <div class="notepad-menu">
+                            <button type="button" class="notepad-menu-btn" data-notepad-menu="file">File</button>
+                            <div class="notepad-menu-list" data-notepad-menu-list="file">
+                              <button type="button" data-notepad-cmd="new">New<span>Ctrl+N</span></button>
+                              <button type="button" data-notepad-cmd="open">Open…<span>Ctrl+O</span></button>
+                              <button type="button" data-notepad-cmd="save">Save<span>Ctrl+S</span></button>
+                              <button type="button" data-notepad-cmd="saveAs">Save As…<span>Ctrl+Shift+S</span></button>
+                              <hr />
+                              <button type="button" data-notepad-cmd="exit">Close<span>Alt+F4</span></button>
+                            </div>
+                          </div>
+                          <div class="notepad-menu">
+                            <button type="button" class="notepad-menu-btn" data-notepad-menu="edit">Edit</button>
+                            <div class="notepad-menu-list" data-notepad-menu-list="edit">
+                              <button type="button" data-notepad-cmd="undo">Undo<span>Ctrl+Z</span></button>
+                              <button type="button" data-notepad-cmd="redo">Redo<span>Ctrl+Y</span></button>
+                              <hr />
+                              <button type="button" data-notepad-cmd="cut">Cut<span>Ctrl+X</span></button>
+                              <button type="button" data-notepad-cmd="copy">Copy<span>Ctrl+C</span></button>
+                              <button type="button" data-notepad-cmd="paste">Paste<span>Ctrl+V</span></button>
+                              <button type="button" data-notepad-cmd="delete">Delete<span>Del</span></button>
+                              <hr />
+                              <button type="button" data-notepad-cmd="find">Find…<span>Ctrl+F</span></button>
+                              <button type="button" data-notepad-cmd="findNext">Find Next<span>F3</span></button>
+                              <button type="button" data-notepad-cmd="replace">Replace…<span>Ctrl+H</span></button>
+                              <button type="button" data-notepad-cmd="goto">Go To…<span>Ctrl+G</span></button>
+                              <button type="button" data-notepad-cmd="selectAll">Select All<span>Ctrl+A</span></button>
+                              <button type="button" data-notepad-cmd="timeDate">Time/Date<span>F5</span></button>
+                            </div>
+                          </div>
+                          <div class="notepad-menu">
+                            <button type="button" class="notepad-menu-btn" data-notepad-menu="format">Format</button>
+                            <div class="notepad-menu-list" data-notepad-menu-list="format">
+                              <button type="button" data-notepad-cmd="wrap">Word Wrap</button>
+                              <button type="button" data-notepad-cmd="fontUp">Larger text<span>Ctrl++</span></button>
+                              <button type="button" data-notepad-cmd="fontDown">Smaller text<span>Ctrl+-</span></button>
+                            </div>
+                          </div>
+                          <div class="notepad-menu">
+                            <button type="button" class="notepad-menu-btn" data-notepad-menu="view">View</button>
+                            <div class="notepad-menu-list" data-notepad-menu-list="view">
+                              <button type="button" data-notepad-cmd="find">Find bar</button>
+                              <button type="button" data-notepad-cmd="status">Status bar</button>
+                            </div>
+                          </div>
+                        </div>
+                        <div id="notepad-find" class="notepad-find" hidden data-mode="find">
+                          <label class="notepad-find-fields">Find
+                            <input id="notepad-find-q" type="search" spellcheck="false" placeholder="Find" />
+                          </label>
+                          <button type="button" class="mini-dev-btn notepad-find-fields" data-notepad-cmd="findPrev">Prev</button>
+                          <button type="button" class="mini-dev-btn notepad-find-fields" data-notepad-cmd="findNext">Next</button>
+                          <label class="notepad-replace-fields">Replace
+                            <input id="notepad-repl" type="text" spellcheck="false" placeholder="Replace with" />
+                          </label>
+                          <button type="button" class="mini-dev-btn notepad-replace-fields" data-notepad-cmd="replaceOne">Replace</button>
+                          <button type="button" class="mini-dev-btn notepad-replace-fields" data-notepad-cmd="replaceAll">All</button>
+                          <label class="notepad-goto-fields">Line
+                            <input id="notepad-goto" type="number" min="1" step="1" placeholder="1" />
+                          </label>
+                          <button type="button" class="mini-dev-btn notepad-goto-fields" data-notepad-cmd="gotoGo">Go</button>
+                          <label class="notepad-find-case notepad-find-fields"><input id="notepad-find-case" type="checkbox" /> Match case</label>
+                          <button type="button" class="notepad-find-close" data-notepad-cmd="findClose" title="Close">✕</button>
+                        </div>
+                      </div>
+                      <textarea id="notepad-editor" spellcheck="true" placeholder="Start writing…" wrap="soft"></textarea>
+                      <div id="notepad-status" class="notepad-status">
+                        <span id="notepad-name">Untitled</span>
+                        <span id="notepad-pos">Ln 1, Col 1</span>
+                        <span id="notepad-counts">0 words</span>
+                        <span id="notepad-wrap-label">Wrap on</span>
+                      </div>
+                      <div id="notepad-dialog" class="notepad-dialog" hidden>
+                        <div class="notepad-dialog-card">
+                          <h4 id="notepad-dialog-title">Open</h4>
+                          <div class="notepad-dialog-browser">
+                            <div class="notepad-dialog-places" id="notepad-dialog-places">
+                              <button type="button" data-notepad-place="">📁 Home</button>
+                              <button type="button" data-notepad-place="Desktop">📁 Desktop</button>
+                              <button type="button" data-notepad-place="Documents">📁 Documents</button>
+                              <button type="button" data-notepad-place="Downloads">📁 Downloads</button>
+                              <button type="button" data-notepad-place="Pictures">📁 Pictures</button>
+                              <button type="button" data-notepad-place="Music">📁 Music</button>
+                              <button type="button" data-notepad-place="Videos">📁 Videos</button>
+                            </div>
+                            <div class="notepad-dialog-files">
+                              <div class="notepad-dialog-path" id="notepad-dialog-path">~/Documents</div>
+                              <div id="notepad-dialog-list" class="notepad-dialog-list"></div>
+                            </div>
+                          </div>
+                          <label class="notepad-dialog-name">File name
+                            <input id="notepad-dialog-name" type="text" spellcheck="false" placeholder="notes.txt" />
+                          </label>
+                          <div id="notepad-dialog-error" class="notepad-dialog-error" hidden></div>
+                          <div class="notepad-dialog-actions">
+                            <button type="button" id="notepad-dialog-ok" class="os-settings-save">Open</button>
+                            <button type="button" id="notepad-dialog-cancel" class="mini-dev-btn">Cancel</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="desktop-window app-window maximized-window focused-window" data-window-app="preview" data-surface="preview" data-open="true"
+                           style="left:70px; top:28px; width:calc(100% - 92px); height:calc(100% - 64px); z-index:20;">
+                    <div class="desktop-window-titlebar window-drag-handle">
+                      <div class="window-title-left">
+                        <span class="window-app-dot preview-dot"></span>
+                        <strong>Robot Simulator</strong>
+                      </div>
+                      <div class="window-controls">
+                        <button type="button" class="win-btn close" data-window-action="close" title="Close"></button>
+                        <button type="button" class="win-btn min" data-window-action="minimize" title="Minimize"></button>
+                        <button type="button" class="win-btn max" data-window-action="maximize" title="Maximize"></button>
+                      </div>
+                    </div>
+                    <div class="desktop-window-content minios-preview-window robot-mode">
+                      <div class="minios-preview-toolbar">
+                        <span id="preview-path">Teela Robot Body Simulator</span>
+                        <button id="preview-robot" type="button" class="mini-dev-btn">Robot</button>
+                        <button id="preview-browser" type="button" class="mini-dev-btn" disabled>Open in Browser</button>
+                      </div>
+                      <iframe id="app-preview-frame" title="Teela Robot Body Simulator" src="/ui/robot-simulator.html?v=138" sandbox="allow-scripts allow-forms allow-modals allow-downloads"></iframe>
+                    </div>
+                  </section>
+
+                  <section class="desktop-window app-window hidden-window" data-window-app="dev" data-surface="dev" data-open="false"
+                           style="left:92px; top:42px; width:calc(100% - 116px); height:calc(100% - 78px); z-index:8;">
+                    <div class="desktop-window-titlebar window-drag-handle">
+                      <div class="window-title-left">
+                        <span class="window-app-dot dev-dot"></span>
+                        <strong>Build &amp; Test Center</strong>
+                      </div>
+                      <div class="window-controls">
+                        <button type="button" class="win-btn close" data-window-action="close" title="Close"></button>
+                        <button type="button" class="win-btn min" data-window-action="minimize" title="Minimize"></button>
+                        <button type="button" class="win-btn max" data-window-action="maximize" title="Maximize"></button>
+                      </div>
+                    </div>
+                    <div class="desktop-window-content minios-dev-window">
+                      <div class="minios-dev-head">
+                        <div><span class="muted">Detected:</span> <strong id="dev-kind">generic</strong></div>
+                        <div class="minios-dev-presets">
+                          <button id="dev-build" type="button" class="mini-dev-btn">Build</button>
+                          <button id="dev-test" type="button" class="mini-dev-btn primary">Test</button>
+                          <button id="dev-run" type="button" class="mini-dev-btn">Run</button>
+                        </div>
+                      </div>
+                      <div class="minios-command-row">
+                        <input id="dev-command" type="text" spellcheck="false" placeholder="Command in bot workspace" />
+                        <button id="dev-command-run" type="button" class="mini-dev-btn primary">Run Command</button>
+                      </div>
+                      <pre id="dev-output" class="minios-dev-output">Select a bot to inspect its build system.</pre>
+                    </div>
+                  </section>
+
+                  <section class="desktop-window app-window hidden-window" data-window-app="settings" data-open="false"
+                           style="left:80px; top:36px; width:min(420px, calc(100% - 100px)); height:min(420px, calc(100% - 80px)); z-index:16;">
+                    <div class="desktop-window-titlebar window-drag-handle">
+                      <div class="window-title-left">
+                        <span class="window-app-dot settings-dot"></span>
+                        <strong>Settings</strong>
+                      </div>
+                      <div class="window-controls">
+                        <button type="button" class="win-btn close" data-window-action="close" title="Close"></button>
+                        <button type="button" class="win-btn min" data-window-action="minimize" title="Minimize"></button>
+                        <button type="button" class="win-btn max" data-window-action="maximize" title="Maximize"></button>
+                      </div>
+                    </div>
+                    <div class="desktop-window-content os-settings-window">
+                      <div class="os-settings-body">
+                        <h3>Appearance</h3>
+                        <div class="os-settings-label">Wallpaper</div>
+                        <div class="wallpaper-swatches" id="os-wallpaper-swatches">
+                          <button type="button" class="os-swatch active" data-bg="1" title="Aubergine" style="background:linear-gradient(160deg,#3b0f2b,#5e2750,#a34a2f)"></button>
+                          <button type="button" class="os-swatch" data-bg="2" title="Blue" style="background:linear-gradient(160deg,#0d1b2a,#1b263b,#415a77)"></button>
+                          <button type="button" class="os-swatch" data-bg="3" title="Green" style="background:linear-gradient(160deg,#132213,#274627,#4a6b3a)"></button>
+                        </div>
+                        <h3>Lock screen</h3>
+                        <p class="os-settings-copy">The lock screen shows this bot’s name. Set a password to unlock MiniOS.</p>
+                        <label class="os-settings-row">Password
+                          <input id="os-settings-password" type="password" autocomplete="new-password" placeholder="Leave blank for no password" />
+                        </label>
+                        <div class="os-settings-actions">
+                          <button type="button" id="os-settings-save" class="os-settings-save">Save</button>
+                          <span id="os-settings-status" class="os-settings-status"></span>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <div id="agentDesktopCursor" class="agent-desktop-cursor" hidden aria-hidden="true">
+                    <svg viewBox="0 0 24 32" focusable="false" aria-hidden="true">
+                      <path class="agent-cursor-arrow" d="M2 1.5V24.2L8.4 18L13.3 29.2L17.1 27.5L12.3 16.6H21.6L2 1.5Z" />
+                    </svg>
+                    <span class="agent-cursor-click-ring"></span>
+                  </div>
+                </div>
+
+                <div id="dock" class="ubuntu-dock dock-left">
+                  <button type="button" class="dock-app dock-btn" data-desktop-app="grok" data-surface="tui" title="Grok Build TUI"><span>&gt;_</span><i></i></button>
+                  <button type="button" class="dock-app dock-btn" data-desktop-app="files" data-surface="desktop" title="Files"><span>📁</span><i></i></button>
+                  <button type="button" class="dock-app dock-btn" data-desktop-app="notepad" title="Text Editor"><span>📄</span><i></i></button>
+                  <button type="button" class="dock-app dock-btn" data-desktop-app="terminal" data-surface="shell" title="Terminal"><span>⌘</span><i></i></button>
+                  <button type="button" class="dock-app dock-btn" data-desktop-app="browser" data-surface="browser" title="Browser"><span>🌐</span><i></i></button>
+                  <button type="button" class="dock-app dock-btn" data-desktop-app="editor" data-surface="editor" title="Code Editor"><span>📝</span><i></i></button>
+                  <span class="dock-sep" aria-hidden="true"></span>
+                  <button type="button" class="dock-app dock-btn running active" data-desktop-app="preview" data-surface="preview" title="Robot Simulator"><span>🤖</span><i></i></button>
+                  <button type="button" class="dock-app dock-btn" data-desktop-app="dev" data-surface="dev" title="Build & Test"><span>🧪</span><i></i></button>
+                  <button type="button" class="dock-app dock-btn" data-desktop-app="settings" title="Settings"><span>⚙</span><i></i></button>
+                </div>
+                <div id="dock-hint" class="dock-edge-hint">Drag the dock to any edge of the screen</div>
+              </div>
+            </div>
+
+            <div class="desktop-shortcuts">
+              <button type="button" class="desktop-shortcut dock-btn" data-desktop-app="grok" data-surface="tui">&gt;_ Grok</button>
+              <button type="button" class="desktop-shortcut dock-btn" data-desktop-app="browser" data-surface="browser">🌐 Browser</button>
+              <button type="button" class="desktop-shortcut dock-btn" data-desktop-app="files" data-surface="desktop">📁 Files</button>
+              <button type="button" class="desktop-shortcut dock-btn" data-desktop-app="notepad">📄 Text</button>
+              <button type="button" class="desktop-shortcut dock-btn" data-desktop-app="terminal" data-surface="shell">⌘ Terminal</button>
+              <button type="button" class="desktop-shortcut dock-btn" data-desktop-app="editor" data-surface="editor">📝 Code</button>
+              <button type="button" class="desktop-shortcut dock-btn" data-desktop-app="dev" data-surface="dev">🧪 Test</button>
+              <button type="button" class="desktop-shortcut" data-desktop-app="workspace" data-surface="desktop">⌂ Workspace</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="workspace-footer" aria-label="Workspace footer">
+          <button type="button" id="routines-open" class="routines-launch" title="Open routines">
+            <span class="routines-launch-icon">▦</span><span>Routines</span>
+          </button>
+        </div>
+
+        <section class="right-section routines-section" id="routines" aria-hidden="true">
+          <div class="right-section-header compact">
+            <div>
+              <div class="right-section-kicker">ROUTINES</div>
+              <small>Recurring agent jobs</small>
+            </div>
+            <div class="routines-panel-actions">
+              <button type="button" id="new-routine" class="small-action primary" hidden>＋ Add</button>
+              <button type="button" id="close-routines-panel" class="icon-btn routines-close" title="Close routines">×</button>
+            </div>
+          </div>
+          <div class="routine-manager-list">
+            <div class="muted empty-manager-state">Routines now open in the Add Routine window.</div>
+          </div>
+        </section>
+
+        <section class="right-section notes-section">
+          <div class="right-section-header compact">
+            <div>
+              <div class="right-section-kicker">HOURLY NOTES</div>
+              <small>Recurring reminders / checks</small>
+            </div>
+            <button type="button" id="add-hourly-note" class="small-action primary">＋ Add</button>
+          </div>
+          <div id="hourly-note-list" class="hourly-note-list">
+            <div class="muted empty-manager-state">No hourly notes yet.</div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <button id="reopen-left" class="edge-handle left hidden" type="button" title="Open bots">›</button>
+    <button id="reopen-right" class="edge-handle right hidden" type="button" title="Open workspace">‹</button>
+
+    <section class="mobile-home" id="mobile-home">
+      <header class="mobile-topbar">
+        <button id="mobile-user-btn" class="avatar-user" type="button">R</button>
+        <div class="mobile-actions">
+          <button id="mobile-search-btn" class="icon-btn" type="button" title="Search agents">⌕</button>
+          <button id="mobile-add-agent" class="icon-btn" type="button" title="Add agent">＋</button>
+        </div>
+      </header>
+      <div id="mobile-featured" class="mobile-featured"></div>
+      <div id="mobile-list" class="mobile-list"></div>
+    </section>
+  </div>
+
+  <div id="routine-modal" class="modal-backdrop hidden" aria-hidden="true">
+    <div class="task-editor-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div>
+          <h2 id="routine-modal-title">Add Routine</h2>
+          <p>Create a recurring job for the selected agent.</p>
+        </div>
+        <button id="close-routine-modal" class="icon-btn" type="button">×</button>
+      </div>
+      <form id="routine-form" class="task-editor-form">
+        <input id="routine-edit-id" type="hidden" />
+        <label>Name<input id="routine-name" name="name" required placeholder="Morning briefing" /></label>
+        <label>
+          Type
+          <select id="routine-type" name="type">
+            <option value="agent_prompt">Agent Prompt</option>
+            <option value="shell_command">Shell Command</option>
+            <option value="script">Script</option>
+            <option value="http_request">HTTP Request</option>
+          </select>
+        </label>
+        <label class="span-2">
+          Instruction / command
+          <textarea id="routine-instruction" name="instruction" rows="5" required placeholder="Check system health and summarize anything that needs attention."></textarea>
+        </label>
+        <label>
+          Repeat every
+          <input id="routine-every" name="every" type="number" min="1" step="1" value="1" />
+        </label>
+        <label>
+          Interval
+          <select id="routine-unit" name="schedulePreset">
+            <option value="minutes">Minutes</option>
+            <option value="hours" selected>Hours</option>
+            <option value="days">Days</option>
+            <option value="weeks">Weeks</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </label>
+        <label class="span-2">
+          Advanced interval (optional)
+          <input id="routine-cron" name="cron" placeholder="Examples: 15m, 2h, 3d, 2w, 1mo, 1y" />
+        </label>
+        <label>
+          Timezone
+          <input id="routine-timezone" name="timezone" value="America/Chicago" />
+        </label>
+        <label class="toggle-label">
+          <input id="routine-enabled" name="enabled" type="checkbox" checked />
+          <span>Enabled</span>
+        </label>
+        <div class="form-actions span-2">
+          <button id="cancel-routine" type="button" class="small-action">Cancel</button>
+          <button type="submit" class="small-action primary">Save routine</button>
+        </div>
+      </form>
+      <div class="routine-modal-existing">
+        <h3>Current routines</h3>
+        <div id="routine-list" class="routine-manager-list">
+          <div class="muted empty-manager-state">No routines yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="hourly-modal" class="modal-backdrop hidden" aria-hidden="true">
+    <div class="task-editor-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div>
+          <h2 id="hourly-modal-title">Add Hourly Note</h2>
+          <p>Add a lightweight recurring check for the selected agent.</p>
+        </div>
+        <button id="close-hourly-modal" class="icon-btn" type="button">×</button>
+      </div>
+      <form id="hourly-form" class="task-editor-form">
+        <input id="hourly-edit-id" type="hidden" />
+        <label class="span-2">Title<input id="hourly-title" required placeholder="Check Qwen performance" /></label>
+        <label class="span-2">
+          Note
+          <textarea id="hourly-text" rows="6" placeholder="Review the current server status and surface any new issue."></textarea>
+        </label>
+        <label>
+          Repeat every
+          <select id="hourly-interval">
+            <option value="1">1 hour</option>
+            <option value="2">2 hours</option>
+            <option value="4">4 hours</option>
+            <option value="6">6 hours</option>
+            <option value="12">12 hours</option>
+          </select>
+        </label>
+        <label class="toggle-label">
+          <input id="hourly-enabled" type="checkbox" checked />
+          <span>Enabled</span>
+        </label>
+        <div class="form-actions span-2">
+          <button id="cancel-hourly" type="button" class="small-action">Cancel</button>
+          <button type="submit" class="small-action primary">Save note</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="settings-modal" class="modal-backdrop hidden" aria-hidden="true">
+    <div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+      <div class="modal-header">
+        <div>
+          <h2 id="settings-modal-title">User & Grok Build Settings</h2>
+          <p>Edit your profile, models, endpoints, environment variables, and generated Grok configuration.</p>
+        </div>
+        <button id="close-settings" class="icon-btn" type="button">×</button>
+      </div>
+      <div class="settings-layout">
+        <nav class="settings-nav" aria-label="Settings sections">
+          <button class="settings-nav-item active" type="button" data-settings-tab="profile">Profile</button>
+          <button class="settings-nav-item" type="button" data-settings-tab="cluster">Cluster</button>
+          <button class="settings-nav-item" type="button" data-settings-tab="models">Models & Endpoints</button>
+          <button class="settings-nav-item" type="button" data-settings-tab="environment">Environment</button>
+          <button class="settings-nav-item" type="button" data-settings-tab="toml">config.toml</button>
+        </nav>
+        <div class="settings-content">
+          <section class="settings-panel active" data-settings-panel="profile">
+            <div class="settings-section-title">
+              <div>
+                <h3>Profile</h3>
+                <p>Shown in the lower-left corner of the interface.</p>
+              </div>
+            </div>
+            <div class="profile-editor">
+              <div id="settings-profile-avatar" class="settings-profile-avatar">R</div>
+              <div class="settings-form-grid">
+                <label>Display name<input id="settings-display-name" value="Roni" autocomplete="off" /></label>
+                <label>Initials<input id="settings-initials" maxlength="3" value="R" autocomplete="off" /></label>
+                <label class="span-2">Local Grok home<input id="settings-grok-home" value="~/.grok" autocomplete="off" /></label>
+                <label>Grok Desk address<input id="settings-desk-host" placeholder="127.0.0.1" autocomplete="off" /></label>
+                <label>Port<input id="settings-desk-port" type="number" min="1" max="65535" step="1" /></label>
+                <p class="span-2 muted" id="settings-desk-hint">Default 127.0.0.1 stays on this computer. Set your LAN IP (for example 10.0.0.10) to open Grok Desk from other devices at http://10.0.0.10:8742/</p>
+              </div>
+            </div>
+          </section>
+          <section class="settings-panel" data-settings-panel="cluster">
+            <div class="settings-section-title">
+              <div>
+                <h3>LAN cluster</h3>
+                <p>Work these four steps on <code>http://127.0.0.1:8742/</code> <strong>on this computer</strong>. The button for each step is in that step. Do not use Confirm unless you are replacing a token this host already saved.</p>
+              </div>
+            </div>
+            <div id="cluster-lan-banner" class="settings-warning" hidden>Open <code>http://127.0.0.1:8742/</code> on this machine to edit the mesh. A phone or LAN IP cannot Save token or peers.</div>
+            <p id="cluster-token-state" class="cluster-token-state">Token: checking…</p>
+            <div class="cluster-wizard">
+              <article class="cluster-step" data-cluster-step="1" id="cluster-step-1">
+                <div class="cluster-step-num">1</div>
+                <div class="cluster-step-body">
+                  <h4>Name this computer</h4>
+                  <p>teela-brain, teela-body, or teela-jetson — the name of the machine you are sitting at.</p>
+                  <label class="cluster-field">Name<input id="settings-node-name" maxlength="64" placeholder="teela-brain" autocomplete="off" /></label>
+                  <button type="button" class="small-action primary" id="cluster-save-name">Save name</button>
+                  <p class="cluster-next" id="cluster-next-1">Next: step 2 — create the token on brain, or paste it on body.</p>
+                </div>
+              </article>
+              <article class="cluster-step" data-cluster-step="2" id="cluster-step-2">
+                <div class="cluster-step-num">2</div>
+                <div class="cluster-step-body">
+                  <h4>Shared cluster token</h4>
+                  <p>One password for all three desks. Generate it once on teela-brain, then paste that same string on the others. You can Generate again anytime to reset — then paste the new token on body/jetson.</p>
+                  <div class="cluster-role-row">
+                    <button type="button" class="small-action" id="cluster-role-create">I’m on teela-brain — create the token</button>
+                    <button type="button" class="small-action" id="cluster-role-paste">I’m on body/jetson — paste the token</button>
+                  </div>
+                  <div id="cluster-create-pane" hidden>
+                    <p>Click Generate / reset token. It is saved on this computer immediately. Copy it, then paste on the other hosts. Confirm is not needed on localhost.</p>
+                    <div class="secret-input-row cluster-token-row">
+                      <input id="settings-cluster-token" type="password" placeholder="Click Generate / reset token" autocomplete="new-password" />
+                      <div class="secret-input-actions">
+                        <button type="button" class="small-action secret-toggle" id="toggle-cluster-token" data-secret-target="settings-cluster-token">Show</button>
+                        <button type="button" class="small-action" id="copy-cluster-token">Copy</button>
+                        <button type="button" class="small-action primary" id="generate-cluster-token">Generate / reset token</button>
+                      </div>
+                    </div>
+                    <div class="cluster-token-reveal" id="cluster-token-reveal" hidden>
+                      <div class="cluster-token-reveal-head">
+                        <span>Copied. Next: on teela-body open this tab, click “paste the token”, paste into the box, Save token.</span>
+                        <button type="button" class="small-action" id="copy-cluster-token-reveal">Copy</button>
+                      </div>
+                      <input id="cluster-token-reveal-value" type="text" readonly spellcheck="false" autocomplete="off" />
+                    </div>
+                  </div>
+                  <div id="cluster-paste-pane" hidden>
+                    <p>Paste the token you copied from teela-brain, then click Save token. Leave Confirm blank.</p>
+                    <label class="cluster-field">Paste token here<input id="cluster-token-paste" type="text" spellcheck="false" autocomplete="off" placeholder="Paste the token from teela-brain" /></label>
+                    <button type="button" class="small-action primary" id="cluster-save-token">Save token on this computer</button>
+                  </div>
+                  <label id="cluster-confirm-wrap" hidden>
+                    Confirm the OLD token already saved here (only to replace it)
+                    <input id="settings-cluster-token-confirm" type="password" placeholder="Old token — not used on first setup" autocomplete="off" />
+                  </label>
+                  <button type="button" class="small-action danger" id="clear-cluster-token" hidden>Clear cluster token</button>
+                  <p class="cluster-next" id="cluster-next-2">Pick a button above: create on brain, or paste on body.</p>
+                </div>
+              </article>
+              <article class="cluster-step" data-cluster-step="3" id="cluster-step-3">
+                <div class="cluster-step-num">3</div>
+                <div class="cluster-step-body">
+                  <h4>Add the other computer</h4>
+                  <p>On teela-body, add name <code>teela-brain</code> and URL <code>http://10.0.0.10:8742</code>. On teela-brain, add name <code>teela-body</code> and body’s LAN IP, like <code>http://10.0.0.20:8742</code>. IPv4 only — no hostnames.</p>
+                  <div class="cluster-peer-toolbar">
+                    <button type="button" class="small-action" id="add-cluster-peer">＋ Add peer</button>
+                    <button type="button" class="small-action primary" id="cluster-save-peers">Save peers</button>
+                  </div>
+                  <div id="cluster-peer-list" class="cluster-peer-list"></div>
+                  <p class="cluster-next" id="cluster-next-3">Fill name + http://IP:8742, then Save peers. Then step 4.</p>
+                </div>
+              </article>
+              <article class="cluster-step" data-cluster-step="4" id="cluster-step-4">
+                <div class="cluster-step-num">4</div>
+                <div class="cluster-step-body">
+                  <h4>Test connection</h4>
+                  <p>Only after steps 2 and 3 are saved on <em>both</em> computers. This tests the last Save, not unsaved boxes.</p>
+                  <button type="button" class="small-action primary" id="test-cluster">Test connection</button>
+                  <pre id="cluster-self-test" class="cluster-self-test generated-box" hidden></pre>
+                  <p class="cluster-next" id="cluster-next-4">If Test says no peers, finish step 3. If auth, the two hosts do not have the same token. If offline, the peer URL/IP is wrong or deskd is not running there.</p>
+                </div>
+              </article>
+            </div>
+          </section>
+          <section class="settings-panel" data-settings-panel="models">
+            <div class="settings-section-title">
+              <div>
+                <h3>Models & Endpoints</h3>
+                <p>Add or remove picker rows, then Save. For a new local checkpoint, set <strong>Local weights dir</strong> under <code>~/models/</code> and Play it from the chat model menu. Remove takes it out of the picker; Delete files also erases that folder.</p>
+              </div>
+              <button id="add-settings-model" class="small-action primary" type="button">＋ Add model</button>
+            </div>
+            <label class="settings-wide-label">
+              Default model
+              <select id="settings-default-model"></select>
+            </label>
+            <div id="settings-model-list" class="settings-model-list"></div>
+          </section>
+          <section class="settings-panel" data-settings-panel="environment">
+            <div class="settings-section-title">
+              <div>
+                <h3>Environment Variables</h3>
+                <p>Optional gateway/proxy configuration. Empty values are omitted from shell exports.</p>
+              </div>
+            </div>
+            <div class="settings-form-grid">
+              <label class="span-2">GROK_MODELS_BASE_URL<input id="env-models-base-url" placeholder="https://gateway.example.com/v1" /></label>
+              <label class="span-2">GROK_MODELS_LIST_URL<input id="env-models-list-url" placeholder="Optional custom /v1/models URL" /></label>
+              <label>
+                XAI_API_KEY
+                <div class="secret-input-row">
+                  <input id="env-xai-api-key" type="password" placeholder="Optional API key" />
+                  <button type="button" class="small-action secret-toggle" data-secret-target="env-xai-api-key">Show</button>
+                </div>
+              </label>
+              <label>
+                GROK_CODE_XAI_API_KEY
+                <div class="secret-input-row">
+                  <input id="env-grok-code-api-key" type="password" placeholder="Compatibility API key" />
+                  <button type="button" class="small-action secret-toggle" data-secret-target="env-grok-code-api-key">Show</button>
+                </div>
+              </label>
+              <label>GROK_DEFAULT_MODEL<input id="env-default-model" placeholder="Optional environment override" /></label>
+              <label>GROK_CONFIG_PATH<input id="env-config-path" placeholder="Optional overlay config path" /></label>
+            </div>
+            <div class="generated-box">
+              <div class="generated-box-header">
+                <strong>Shell exports</strong>
+                <button id="copy-env-exports" class="small-action" type="button">Copy</button>
+              </div>
+              <pre id="env-export-preview"></pre>
+            </div>
+          </section>
+          <section class="settings-panel" data-settings-panel="toml">
+            <div class="settings-section-title">
+              <div>
+                <h3>~/.grok/config.toml</h3>
+                <p>Generated from the settings above, or load an existing TOML file.</p>
+              </div>
+            </div>
+            <div class="toml-toolbar">
+              <input id="load-toml-input" type="file" accept=".toml,text/plain" hidden />
+              <button id="load-toml-btn" class="small-action" type="button">Open config.toml</button>
+              <button id="regenerate-toml-btn" class="small-action" type="button">Regenerate</button>
+              <button id="copy-toml-btn" class="small-action" type="button">Copy</button>
+              <button id="download-toml-btn" class="small-action primary" type="button">Download config.toml</button>
+            </div>
+            <textarea id="raw-toml-editor" class="raw-config-editor" spellcheck="false"></textarea>
+            <div class="settings-warning">
+              Saving here stores the generated config in this browser. Download <code>config.toml</code> and place it in your Grok home to apply it on the host.
+            </div>
+          </section>
+        </div>
+      </div>
+      <div class="settings-footer">
+        <span id="settings-save-status" class="settings-save-status"></span>
+        <div>
+          <button id="cancel-settings" class="small-action" type="button">Cancel</button>
+          <button id="save-settings" class="small-action primary" type="button">Save settings</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="agent-modal" class="modal-backdrop hidden" aria-hidden="true">
+    <div class="agent-create-modal" role="dialog" aria-modal="true" aria-labelledby="agent-modal-title">
+      <div class="modal-header">
+        <div>
+          <h2 id="agent-modal-title">Create Agent</h2>
+          <p id="agent-modal-copy">Create a bot with its own identity, model, and isolated workspace.</p>
+        </div>
+        <button id="close-agent-modal" class="icon-btn" type="button">×</button>
+      </div>
+      <div class="agent-create-grid">
+        <div class="agent-avatar-builder">
+          <div id="agent-preview-avatar" class="avatar glance agent-preview-large" data-state="idle" style="--c:#8b5cf6">
+            <span class="shine"></span>
+          </div>
+          <span class="builder-caption">Live avatar preview</span>
+          <div class="avatar-colors" id="avatar-color-choices">
+            <button type="button" class="color-swatch active" data-color="#8b5cf6" style="--swatch:#8b5cf6"></button>
+            <button type="button" class="color-swatch" data-color="#2f91f2" style="--swatch:#2f91f2"></button>
+            <button type="button" class="color-swatch" data-color="#21b96b" style="--swatch:#21b96b"></button>
+            <button type="button" class="color-swatch" data-color="#ff7817" style="--swatch:#ff7817"></button>
+            <button type="button" class="color-swatch" data-color="#f03f55" style="--swatch:#f03f55"></button>
+            <button type="button" class="color-swatch" data-color="#ef4d98" style="--swatch:#ef4d98"></button>
+          </div>
+          <label class="builder-label">
+            Shape
+            <select id="new-agent-shape">
+              <option value="">Orb</option>
+              <option value="blob">Blob</option>
+              <option value="drop">Drop</option>
+              <option value="square">Rounded square</option>
+              <option value="triangle">Triangle</option>
+            </select>
+          </label>
+        </div>
+        <form id="create-agent-form" class="agent-fields">
+          <input id="agent-edit-id" type="hidden" />
+          <label>Agent name<input id="new-agent-name" required placeholder="Research Lead" /></label>
+          <label>
+            Home node
+            <select id="new-agent-home"></select>
+          </label>
+          <label>
+            Model
+            <select id="new-agent-model"></select>
+          </label>
+          <fieldset class="span-2 agent-kind-picker" id="agent-kind-picker">
+            <legend>Agent type</legend>
+            <div class="agent-kind-cards">
+              <label class="agent-kind-card">
+                <input type="radio" name="agent-kind" id="agent-kind-grok-build" value="grok-build" />
+                <strong>Grok Build</strong>
+                <span>Same tools, answers, and transcript as a regular grok TUI session. No robot body.</span>
+              </label>
+              <label class="agent-kind-card">
+                <input type="radio" name="agent-kind" id="agent-kind-teela-brain" value="teela-brain" checked />
+                <strong>Teela Brain</strong>
+                <span>Teela body sense and physical-robot control. Only one Teela Brain per computer.</span>
+              </label>
+            </div>
+          </fieldset>
+          <p class="field-hint span-2" id="agent-home-note">Which computer this agent runs on.</p>
+          <label class="span-2">Description<input id="new-agent-description" placeholder="What this agent is responsible for" /></label>
+          <label class="span-2 soul-field">SOUL / behavior<textarea id="new-agent-soul" rows="16" placeholder="Describe this agent's personality, goals, constraints, and working style."></textarea></label>
+          <div class="agent-modal-note span-2" id="agent-modal-note">A dedicated workspace, browser, and memory will be created for this agent.</div>
+          <div class="span-2 workspace-share-block" id="workspace-share-block" hidden>
+            <div class="workspace-share-title">Workspace sharing</div>
+            <p class="field-hint">Grant read-only access so another bot can list and read this desk. Memory stays private. The other bot still cannot write here.</p>
+            <div id="workspace-share-requests" class="workspace-share-requests" hidden></div>
+            <div id="workspace-share-list" class="workspace-share-list"></div>
+          </div>
+          <div class="form-actions span-2">
+            <div id="agent-edit-form-actions" class="form-actions-left" hidden>
+              <button id="clear-agent-chat" type="button" class="small-action danger">Clear chat</button>
+              <button id="agent-import-chat" type="button" class="small-action">Import chat</button>
+            </div>
+            <button id="cancel-agent-create" type="button" class="small-action">Cancel</button>
+            <button type="submit" class="small-action primary" id="agent-submit">Create agent</button>
+          </div>
+        </form>
+      </div>
+      <div id="agent-edit-actions" class="agent-modal-footer" hidden>
+        <button id="agent-delete-bot" type="button" class="small-action danger">Delete bot</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="plugins-modal" class="modal-backdrop hidden" aria-hidden="true">
+    <div class="plugins-modal" role="dialog" aria-modal="true" aria-labelledby="plugins-title">
+      <div class="modal-header">
+        <div>
+          <h2 id="plugins-title">Plugins</h2>
+          <p>Add capabilities to your bots. Installed plugins are remembered in this browser; live tools still come from each bot’s Grok home.</p>
+        </div>
+        <button id="close-plugins-modal" class="icon-btn" type="button">×</button>
+      </div>
+      <div class="plugin-search-row">
+        <input id="plugin-search" type="text" placeholder="Search plugins" />
+        <button id="add-custom-plugin" class="small-action primary" type="button">＋ Add plugin</button>
+      </div>
+      <div id="plugin-catalog" class="plugin-catalog"></div>
+      <div id="custom-plugin-form" class="custom-plugin-form hidden">
+        <div class="form-row">
+          <label>Name<input id="custom-plugin-name" placeholder="My Plugin" /></label>
+          <label>Endpoint / command<input id="custom-plugin-endpoint" placeholder="http://localhost:3000 or command" /></label>
+        </div>
+        <div class="form-actions">
+          <button id="cancel-custom-plugin" class="small-action" type="button">Cancel</button>
+          <button id="save-custom-plugin" class="small-action primary" type="button">Save plugin</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="soul-dialog">
+    <form method="dialog" id="soul-form">
+      <h2>SOUL</h2>
+      <p class="muted">Runtime identity. Saving starts a new session.</p>
+      <textarea id="soul-body" rows="18"></textarea>
+      <menu>
+        <button value="cancel" type="button" id="soul-cancel">Cancel</button>
+        <button value="save" id="soul-save">Save SOUL</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="/vendor/xterm.js"></script>
+  <script src="/vendor/xterm-addon-fit.js"></script>
+  <script src="/grokbot-ui.js?v=59"></script>
+  <script src="/app.js?v=188"></script>
+</body>
+</html>

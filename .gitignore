@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.env
+auth.json
+desk.json
+.grok/
+token
+*.sqlite
+teela-architecture-review.zip
+.DS_Store
+teela/.inner.sh
+teela/.inner-fast.sh
+teela/*.bak
+teela/*.bak.*
+teela/Las_Catrina.obj
