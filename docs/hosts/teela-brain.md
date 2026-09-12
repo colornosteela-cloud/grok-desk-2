@@ -53,8 +53,8 @@ Short voice-chat replies go through the 27B lane while it holds the GPUs. deskd 
 
 UI has two round buttons in the composer: 🔊/🔇 (voice on/off, persisted in `desk.json` `voice`) and 🎤 (tap-to-talk).
 
-- **Out**: browser → `POST /v1/tts` → Chatterbox-Turbo on teela-body (`127.0.0.1:8090`, `teela-tts-tunnel` SSH; body stays loopback-only). Jade is Teela-brain's user voice only — teammate DMs are not spoken. Spoken replies may include official Turbo tags (`[happy]`, `[chuckle]`, `[laugh]`, `[surprised]`, `[gasp]`, `[sigh]`, …). Chat hides the tags; TTS keeps them.
-- **In**: browser MediaRecorder (webm/opus) → `POST /v1/stt` → faster-whisper `small.en` on **teela-body** (`teela-stt.service` there), tunneled here as `teela-stt-tunnel` → `127.0.0.1:8091`. Brain's own `teela-stt.service` stays disabled so Whisper does not steal GPU0 from 27B.
+- **Out**: browser → `POST /v1/tts` → deskd → Chatterbox-Turbo on **teela-body** (`TEELA_TTS_URL`, default LAN `:8090`). Jade is Teela-brain's user voice only — teammate DMs are not spoken. Spoken replies may include official Turbo tags (`[happy]`, `[chuckle]`, `[laugh]`, `[surprised]`, `[gasp]`, `[sigh]`, …). Chat hides the tags; TTS keeps them.
+- **In**: browser MediaRecorder (webm/opus) → `POST /v1/stt` → deskd → faster-whisper `small.en` on **teela-body** (`TEELA_STT_URL`, default LAN `:8091`). Brain's own `teela-stt.service` stays disabled so Whisper does not steal GPU0 from 27B.
 - **Model awareness**: every ACP turn is prefixed with `[Voice mode: ON/OFF]` so the bot writes for the ear when voice is on.
 - **Teammate DMs**: Teela records inbound DMs in chat and does **not** start an ACP turn (ping only). Body Bot (grok-build) still ACP-replies to DMs. Jade never reads DMs or “Sent to …” lines.
 - **One speaker per reply**: voice on/off is global, but playback is per-page. The prompt POST carries a per-tab `page_id`; deskd tags assistant-chat and turn-completed events with it, and each page only speaks when the tag matches its own id. Two open devices don't both talk. Overlapping TTS fetches are generation-token cancelled.

@@ -44,6 +44,10 @@ Open `http://127.0.0.1:8742/` **on teela-body**, Save, then Test. Full walkthrou
 
 Optional later: CUDA vLLM on `:8000`. Existing `/v1/llm` alias/proxy on *this* deskd applies unchanged.
 
+## Voice (Jade TTS / Whisper STT)
+
+This box serves Chatterbox-Turbo (`:8090`) and faster-whisper `small.en` (`:8091`). Bind them on the LAN (or `0.0.0.0`) so teela-brain can reach them at `http://<body-lan-ip>:8090` and `:8091`. deskd on teela-brain defaults to `TEELA_TTS_URL` / `TEELA_STT_URL` (LAN `10.0.0.118`); override with those env vars if the IP changes. Do not run Whisper on teela-brain — it steals GPU0 from 27B.
+
 ## Motion / perception (not cognition)
 
 This box is the **motor cortex + visual cortex**, not the MiniOS planner.

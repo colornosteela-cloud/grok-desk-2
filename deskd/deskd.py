@@ -64,6 +64,7 @@ from cluster import (
 import memory as botmem
 import working_memory as wm
 import context_manager as cm
+import voice_upstream as vu
 
 _LOGIN_HOME = resolve_login_home()
 GROK_BIN = resolve_grok_bin()
@@ -181,10 +182,9 @@ CLUSTER_KEYS = (
     "peers_loaded",
 )
 
-# Voice stack: TTS = Chatterbox on teela-body (SSH tunnel → 127.0.0.1:8090),
-# STT = local faster-whisper service on 127.0.0.1:8091.
-TTS_UPSTREAM = os.environ.get("GROK_DESK_TTS", "http://127.0.0.1:8090")
-STT_UPSTREAM = os.environ.get("GROK_DESK_STT", "http://127.0.0.1:8091")
+# Voice stack: Chatterbox TTS + faster-whisper STT. URLs come from
+# voice_upstream (TEELA_TTS_URL / TEELA_STT_URL, GROK_DESK_* aliases).
+# On teela-brain the default is teela-body over LAN, not a localhost tunnel.
 
 
 class DeskHTTPServer(ThreadingHTTPServer):
@@ -10194,7 +10194,7 @@ def teela_minios_report(bot: Any) -> dict[str, Any]:
 
 
 def teela_host_report(bot: Any) -> dict[str, Any]:
-    """teela-brain host only: GPUs, llama, TTS/STT tunnels, RAM, cluster. Not MiniOS."""
+    """teela-brain host only: GPUs, llama, TTS/STT, RAM, cluster. Not MiniOS."""
     origin = cluster.node_name if cluster is not None else "teela-brain"
     model_id = str(getattr(bot, "model", "") or "")
     serving = False
@@ -10205,8 +10205,11 @@ def teela_host_report(bot: Any) -> dict[str, Any]:
     gpus = _nvidia_snapshot()
     mem = _host_mem_gib()
     llm_up = _http_up("http://127.0.0.1:8081/v1/models") or serving
-    tts_up = _http_up(f"{TTS_UPSTREAM.rstrip('/')}/health")
-    stt_up = _http_up(f"{STT_UPSTREAM.rstrip('/')}/health")
+    voice = vu.health_snapshot()
+    tts_up = (voice.get("tts") or {}).get("status") == "ready"
+    stt_up = (voice.get("stt") or {}).get("status") == "ready"
+    tts_host = (voice.get("tts") or {}).get("host") or vu.host_label(vu.tts_url())
+    stt_host = (voice.get("stt") or {}).get("host") or vu.host_label(vu.stt_url())
     peers: list[dict[str, Any]] = []
     if cluster is not None:
         for p in list(getattr(cluster, "peers", None) or []):
@@ -10226,17 +10229,17 @@ def teela_host_report(bot: Any) -> dict[str, Any]:
         bits.append("nvidia-smi not available")
     if mem:
         bits.append(f"RAM {mem[1]} of {mem[0]} GiB free")
-    bits.append("Jade TTS tunnel is up" if tts_up else "Jade TTS tunnel is down")
-    bits.append("Whisper STT tunnel is up" if stt_up else "Whisper STT tunnel is down")
+    bits.append(f"Jade TTS on {tts_host} is ready" if tts_up else f"Jade TTS on {tts_host} is unavailable")
+    bits.append(f"Whisper STT on {stt_host} is ready" if stt_up else f"Whisper STT on {stt_host} is unavailable")
     if peers:
         bits.append(f"{len(peers)} cluster peer(s)")
     issues: list[str] = []
     if not (serving or llm_up):
         issues.append("brain model is not serving")
     if not tts_up:
-        issues.append("TTS tunnel down")
+        issues.append("TTS unavailable")
     if not stt_up:
-        issues.append("STT tunnel down")
+        issues.append("STT unavailable")
     return {
         "ok": bool(serving or llm_up),
         "scope": "host",
@@ -10251,8 +10254,8 @@ def teela_host_report(bot: Any) -> dict[str, Any]:
         },
         "gpus": gpus,
         "ram_gib": {"total": mem[0], "available": mem[1]} if mem else None,
-        "tts": tts_up,
-        "stt": stt_up,
+        "tts": voice.get("tts") or {"host": tts_host, "status": "unavailable"},
+        "stt": voice.get("stt") or {"host": stt_host, "status": "unavailable"},
         "cluster": {
             "node": origin,
             "peers": peers,
@@ -16923,35 +16926,11 @@ class Handler(BaseHTTPRequestHandler):
     def _voice_upstream(self, method: str, url: str, data: bytes | None,
                         content_type: str | None, timeout: float,
                         headers: dict[str, str] | None = None) -> tuple[int, bytes]:
-        req = urllib.request.Request(url, data=data, method=method)
-        if content_type:
-            req.add_header("Content-Type", content_type)
-        for key, value in (headers or {}).items():
-            req.add_header(key, value)
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return r.status, r.read()
-        except urllib.error.HTTPError as e:
-            return e.code, e.read()
-        except Exception as e:
-            return 502, json.dumps({"error": f"upstream unreachable: {e}"}).encode()
+        return vu.fetch(method, url, data=data, content_type=content_type, timeout=timeout, headers=headers)
 
     def _voice_health(self) -> None:
-        tts_code, tts_raw = self._voice_upstream("GET", f"{TTS_UPSTREAM}/health", None, None, 3)
-        stt_code, stt_raw = self._voice_upstream("GET", f"{STT_UPSTREAM}/health", None, None, 3)
-
-        def _parse(code: int, raw: bytes) -> dict[str, Any]:
-            if code == 200:
-                try:
-                    return json.loads(raw or b"{}")
-                except json.JSONDecodeError:
-                    return {"ready": False, "error": "bad health payload"}
-            try:
-                return {"ready": False, "error": str(json.loads(raw or b"{}").get("error", "unreachable"))}
-            except json.JSONDecodeError:
-                return {"ready": False, "error": "unreachable"}
-
-        self._json(200, {"tts": _parse(tts_code, tts_raw), "stt": _parse(stt_code, stt_raw), "voice": voice_enabled()})
+        snap = vu.health_snapshot()
+        self._json(200, {**snap, "voice": voice_enabled()})
 
     def _tts_request(self) -> None:
         body = self._read_json()
@@ -16959,8 +16938,8 @@ class Handler(BaseHTTPRequestHandler):
         if not text:
             return self._json(400, {"error": "text required"})
         code, raw = self._voice_upstream(
-            "POST", f"{TTS_UPSTREAM}/tts", json.dumps({"text": text}).encode(),
-            "application/json", 180,
+            "POST", f"{vu.tts_url()}/tts", json.dumps({"text": text}).encode(),
+            "application/json", vu.TTS_TIMEOUT_S,
         )
         if code != 200 or not raw:
             try:
@@ -16982,7 +16961,7 @@ class Handler(BaseHTTPRequestHandler):
         if (self.headers.get("X-STT-Partial") or "").strip() == "1":
             extra["X-STT-Partial"] = "1"
         code, raw = self._voice_upstream(
-            "POST", f"{STT_UPSTREAM}/transcribe", audio, ctype, 180, headers=extra or None
+            "POST", f"{vu.stt_url()}/transcribe", audio, ctype, vu.STT_TIMEOUT_S, headers=extra or None
         )
         try:
             out = json.loads(raw or b"{}")
