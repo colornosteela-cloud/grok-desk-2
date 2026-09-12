@@ -398,6 +398,59 @@ class AvatarPersistTests(unittest.TestCase):
         self.assertEqual(len(row["models"]), 2)
 
 
+class AuthShareTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name) / ".grok"
+        self.home.mkdir()
+        self._orig = d.USER_GROK_HOME
+        d.USER_GROK_HOME = self.home
+
+    def tearDown(self) -> None:
+        d.USER_GROK_HOME = self._orig
+        self.tmp.cleanup()
+
+    def test_copy_auth_symlinks_host_file(self) -> None:
+        host = self.home / "auth.json"
+        host.write_text('{"k": 1}', encoding="utf-8")
+        dst = Path(self.tmp.name) / "bot" / "auth.json"
+        d.copy_auth(dst)
+        self.assertTrue(dst.is_symlink())
+        self.assertEqual(dst.resolve(), host.resolve())
+        host.write_text('{"k": 2}', encoding="utf-8")
+        self.assertEqual(dst.read_text(encoding="utf-8"), '{"k": 2}')
+
+    def test_copy_auth_replaces_stale_byte_copy(self) -> None:
+        host = self.home / "auth.json"
+        host.write_text('{"host": true}', encoding="utf-8")
+        dst = Path(self.tmp.name) / "bot" / "auth.json"
+        dst.parent.mkdir()
+        dst.write_text('{"forked": true}', encoding="utf-8")
+        d.copy_auth(dst)
+        self.assertTrue(dst.is_symlink())
+        self.assertEqual(dst.read_text(encoding="utf-8"), '{"host": true}')
+
+    def test_copy_auth_shares_lockfile(self) -> None:
+        dst = Path(self.tmp.name) / "bot" / "auth.json"
+        d.copy_auth(dst)
+        lock = dst.with_name("auth.json.lock")
+        self.assertTrue(lock.is_symlink())
+        self.assertEqual(lock.resolve(), (self.home / "auth.json.lock").resolve())
+
+    def test_apply_shared_grok_auth_sets_path(self) -> None:
+        env: dict[str, str] = {}
+        d.apply_shared_grok_auth(env)
+        self.assertEqual(env["GROK_AUTH_PATH"], str(self.home / "auth.json"))
+
+    def test_acp_and_tui_use_shared_auth(self) -> None:
+        src = Path(d.__file__).read_text(encoding="utf-8")
+        start = src.split("def _start_locked", 1)[1].split("def ", 1)[0]
+        tui = src.split("def ensure_tui", 1)[1].split("def ", 1)[0]
+        self.assertIn("apply_shared_grok_auth(env)", start)
+        self.assertIn("apply_shared_grok_auth(env)", tui)
+        self.assertNotIn('shutil.copy2(auth, tui_home / "auth.json")', tui)
+
+
 class GrokBinTests(unittest.TestCase):
     def test_resolve_prefers_existing_path(self) -> None:
         from surfaces import resolve_grok_bin

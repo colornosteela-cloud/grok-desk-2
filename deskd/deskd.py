@@ -132,8 +132,9 @@ _CTX_OVERFLOW_RE = re.compile(
     r"contains at least (\d+) input tokens",
     re.I | re.S,
 )
-# session/prompt: wait as long as cloud (tool turns + XPU prefill). If the local
-# engine is gone, fail in ACP_LOCAL_DOWN_GRACE_SEC instead of a cryptic 90s hang.
+# session/prompt: idle silence cap, not wall-clock. Tokens, tools, and thoughts
+# refresh the wait so a 10+ minute coding turn is not killed while it is working.
+# If the local engine is gone, fail in ACP_LOCAL_DOWN_GRACE_SEC instead of hanging.
 ACP_PROMPT_MAX_SEC = 600
 ACP_LOCAL_DOWN_GRACE_SEC = 12
 # Qwen and Muse share the two Arc B60s. Only the currently served vLLM id is selectable.
@@ -695,12 +696,49 @@ def desk_token() -> str:
     return ""
 
 
+def host_auth_path() -> Path:
+    return USER_GROK_HOME / "auth.json"
+
+
+def apply_shared_grok_auth(env: dict[str, str]) -> None:
+    """Make a child grok process use the host login file, not a forked copy."""
+    env["GROK_AUTH_PATH"] = str(host_auth_path())
+
+
+def _share_host_file(link: Path, target: Path) -> None:
+    try:
+        if link.is_symlink() and link.resolve() == target.resolve():
+            return
+    except OSError:
+        pass
+    try:
+        if link.exists() or link.is_symlink():
+            link.unlink()
+    except OSError:
+        pass
+    try:
+        link.symlink_to(target)
+    except OSError:
+        if target.is_file():
+            shutil.copy2(target, link)
+            try:
+                os.chmod(link, 0o600)
+            except OSError:
+                pass
+
+
 def copy_auth(dst: Path) -> None:
-    src = USER_GROK_HOME / "auth.json"
+    """Share the host OIDC file with a child GROK_HOME.
+
+    Byte-copying auth.json forks the refresh token. The first grok process
+    that refreshes revokes every other copy (invalid_grant), which is what
+    forced /login after sleep.
+    """
+    src = host_auth_path()
+    dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if src.is_file():
-        shutil.copy2(src, dst)
-        os.chmod(dst, 0o600)
+    _share_host_file(dst, src)
+    _share_host_file(dst.with_name("auth.json.lock"), src.with_name("auth.json.lock"))
 
 
 _MEDIA_GENERIC_NAMES = {
@@ -11409,6 +11447,9 @@ _PREFILL_TOK_S = 70.0
 def emit_local_activity(bot: Any, status: str, thought: str | None = None) -> None:
     if bot is None or turn_was_cancelled(bot):
         return
+    acp = getattr(bot, "acp", None)
+    if acp is not None:
+        acp._last_acp_event = time.time()
     bot.status = status
     emit(
         {
@@ -11521,6 +11562,7 @@ class AcpClient:
         )
         env["GROK_DEFAULT_MODEL"] = str(self.bot.model or "")
         env["GROK_CONFIG"] = json.dumps({"models": {"default": self.bot.model}})
+        apply_shared_grok_auth(env)
         copy_auth(self.bot.grok_home / "auth.json")
         sock = self._leader_sock()
         try:
@@ -11707,42 +11749,52 @@ class AcpClient:
             pass
 
     def _wait_prompt(self, rid: int, ev: threading.Event, timeout: float) -> None:
-        """Wait for session/prompt. Fast-fail if the local GPU engine has died."""
-        deadline = time.time() + max(1.0, float(timeout))
+        """Wait for session/prompt. Fast-fail if the local GPU engine has died.
+
+        `timeout` is idle silence, not wall-clock. session/update (tokens, tools,
+        thoughts) and local prefill ticks refresh `_last_acp_event`.
+        """
+        idle_limit = max(1.0, float(timeout))
         slice_s = 0.25
         while True:
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                break
             if self._turn_cancel.is_set():
                 self._pending.pop(rid, None)
                 raise RuntimeError("cancelled")
-            if ev.wait(min(slice_s, remaining)):
+            if ev.wait(slice_s):
                 return
+            idle = time.time() - float(self._last_acp_event or 0)
             try:
                 local = uses_local_text_llm(getattr(self.bot, "model", ""))
             except Exception:
                 local = False
-            if not local:
-                continue
-            idle = time.time() - float(self._last_acp_event or 0)
-            if idle < ACP_LOCAL_DOWN_GRACE_SEC:
-                continue
-            try:
-                if local_model_serving(getattr(self.bot, "model", "")):
+            if local:
+                if idle < ACP_LOCAL_DOWN_GRACE_SEC:
                     continue
-            except Exception:
-                pass
-            try:
-                engine = local_llm_engine_state()
-            except Exception:
-                engine = "down"
-            if engine in ("up", "starting"):
+                serving = False
+                try:
+                    serving = bool(local_model_serving(getattr(self.bot, "model", "")))
+                except Exception:
+                    serving = False
+                if serving:
+                    if idle < idle_limit:
+                        continue
+                    self._abandon_prompt(rid)
+                    raise acp_prompt_timeout_error(getattr(self.bot, "model", ""), True)
+                try:
+                    engine = local_llm_engine_state()
+                except Exception:
+                    engine = "down"
+                if engine in ("up", "starting"):
+                    if idle < idle_limit:
+                        continue
+                    self._abandon_prompt(rid)
+                    raise acp_prompt_timeout_error(getattr(self.bot, "model", ""))
+                self._abandon_prompt(rid)
+                raise acp_prompt_timeout_error(getattr(self.bot, "model", ""), False)
+            if idle < idle_limit:
                 continue
             self._abandon_prompt(rid)
-            raise acp_prompt_timeout_error(getattr(self.bot, "model", ""), False)
-        self._abandon_prompt(rid)
-        raise acp_prompt_timeout_error(getattr(self.bot, "model", ""))
+            raise acp_prompt_timeout_error(getattr(self.bot, "model", ""))
 
     def ensure(self) -> None:
         if self.proc and self.proc.poll() is None and self.session_id:
@@ -13675,11 +13727,10 @@ class Bot:
         tui_home = self.grok_home / "tui-home"
         tui_home.mkdir(parents=True, exist_ok=True)
         cfg = self.grok_home / "config.toml"
-        auth = self.grok_home / "auth.json"
         if cfg.is_file():
             shutil.copy2(cfg, tui_home / "config.toml")
-        if auth.is_file():
-            shutil.copy2(auth, tui_home / "auth.json")
+        apply_shared_grok_auth(env)
+        copy_auth(tui_home / "auth.json")
         env["GROK_HOME"] = str(tui_home)
         env["GROK_MEMORY"] = "1"
         mem = self.grok_home / "memory"

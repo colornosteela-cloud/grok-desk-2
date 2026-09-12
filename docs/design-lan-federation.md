@@ -144,7 +144,7 @@ Phone / desktop browser
 
 17. **UI roster merge-by-id is mandatory.** `refreshBots()` must not `state.bots = j.bots`. Server `GET /v1/bots` omits `messages` on every list entry (local and remote). `GET /v1/bots/{id}` still returns the full profile including messages.
 
-18. **`cluster_token` is not a Grok/xAI API key.** Three secrets stay distinct: (a) UI Bearer in `$XDG_RUNTIME_DIR/grok-desk/token`, (b) mesh `cluster_token` in `desk.json` (deskd↔deskd on the LAN), (c) per-host xAI/cloud credentials in that node's `~/.grok/auth.json` copied into each bot's `GROK_HOME` by `copy_auth()`. Body and jetson bots typically **think** with Grok 4.6 cloud on *that* host's keys; brain bots may stay on local vLLM `qwen38`. Cross-node DM/proxy/SSE still needs `cluster_token` even when the remote bot has no local GPU model — brain (local qwen) messages a body bot, body answers with cloud Grok 4.6 on body. Do **not** drop mesh auth because “non-brain nodes use cloud tokens.” Do **not** implement live dual-token cluster rotation; v1 is one shared `cluster_token`, rotated from each host's localhost when needed.
+18. **`cluster_token` is not a Grok/xAI API key.** Three secrets stay distinct: (a) UI Bearer in `$XDG_RUNTIME_DIR/grok-desk/token`, (b) mesh `cluster_token` in `desk.json` (deskd↔deskd on the LAN), (c) per-host xAI/cloud credentials in that node's `~/.grok/auth.json` **shared** into each bot's `GROK_HOME` by `copy_auth()` (symlink + `GROK_AUTH_PATH`; never a byte copy — that forks the OIDC refresh token and forces `/login` after sleep). Body and jetson bots typically **think** with Grok 4.6 cloud on *that* host's keys; brain bots may stay on local vLLM `qwen38`. Cross-node DM/proxy/SSE still needs `cluster_token` even when the remote bot has no local GPU model — brain (local qwen) messages a body bot, body answers with cloud Grok 4.6 on body. Do **not** drop mesh auth because “non-brain nodes use cloud tokens.” Do **not** implement live dual-token cluster rotation; v1 is one shared `cluster_token`, rotated from each host's localhost when needed.
 
 ---
 
@@ -851,7 +851,7 @@ Do not share vLLM. Brain's `/v1/llm` remains loopback-only to `GROK_DESK_LLM` de
 | Node | Typical cognition | Credentials | Mesh |
 | --- | --- | --- | --- |
 | teela-brain | Local vLLM `qwen38` (may also select cloud Grok) | loopback `/v1/llm`; optional `~/.grok/auth.json` | `cluster_token` in `desk.json` |
-| teela-body | **Grok 4.6 cloud** | that host's `~/.grok/auth.json` → `copy_auth()` into `~/.grok/bots/<id>/grok-home` | same `cluster_token` |
+| teela-body | **Grok 4.6 cloud** | that host's `~/.grok/auth.json` → `copy_auth()` **shares** it into `~/.grok/bots/<id>/grok-home` | same `cluster_token` |
 | teela-jetson | **Grok 4.6 cloud** | same pattern on the Jetson | same `cluster_token` |
 
 A brain bot (local qwen) `message_teammate`s a body bot; origin forwards `POST /v1/cluster/dm`; body's ACP child answers with **Grok 4.6 cloud on body's keys/hardware**. Cross-node chat does **not** require the remote node to run a local GPU model. Cloud keys never go in git and are **not** `cluster_token`. Do not “simplify” mesh auth away because body/jetson use cloud tokens.

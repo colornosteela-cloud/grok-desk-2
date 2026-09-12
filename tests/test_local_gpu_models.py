@@ -6,7 +6,9 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import threading
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -931,6 +933,88 @@ class LocalGpuModelTests(unittest.TestCase):
         self.assertEqual(d.ACP_PROMPT_MAX_SEC, 600)
         self.assertEqual(d.ACP_LOCAL_DOWN_GRACE_SEC, 12)
         self.assertIn("def _wait_prompt", text)
+        wait = text.split("def _wait_prompt", 1)[1].split("def ", 1)[0]
+        self.assertIn("idle_limit", wait)
+        self.assertNotIn("deadline = time.time() + max(1.0, float(timeout))", wait)
+
+    def _bare_acp(self, model: str = "grok-4.6") -> d.AcpClient:
+        bot = types.SimpleNamespace(model=model, id="b_test")
+        acp = d.AcpClient.__new__(d.AcpClient)
+        acp.bot = bot
+        acp._pending = {}
+        acp._turn_cancel = threading.Event()
+        acp._last_acp_event = time.time()
+        acp._prompt_rid = None
+        acp.abandoned: list[int] = []
+
+        def abandon(rid: int) -> None:
+            acp.abandoned.append(rid)
+            acp._pending.pop(rid, None)
+
+        acp._abandon_prompt = abandon  # type: ignore[method-assign]
+        return acp
+
+    def test_wait_prompt_activity_extends_idle_cap(self) -> None:
+        acp = self._bare_acp("grok-4.6")
+        rid = 1
+        ev = threading.Event()
+        acp._pending[rid] = (ev, {})
+        acp._last_acp_event = time.time()
+
+        def keep_alive() -> None:
+            for _ in range(8):
+                time.sleep(0.12)
+                acp._last_acp_event = time.time()
+            ev.set()
+
+        t = threading.Thread(target=keep_alive, daemon=True)
+        t.start()
+        acp._wait_prompt(rid, ev, timeout=0.35)
+        t.join(2)
+        self.assertEqual(acp.abandoned, [])
+
+    def test_wait_prompt_idle_still_times_out(self) -> None:
+        acp = self._bare_acp("grok-4.6")
+        rid = 2
+        ev = threading.Event()
+        acp._pending[rid] = (ev, {})
+        acp._last_acp_event = time.time() - 5
+        with self.assertRaises(TimeoutError) as ctx:
+            acp._wait_prompt(rid, ev, timeout=0.3)
+        self.assertEqual(str(ctx.exception), "ACP session/prompt timed out")
+        self.assertEqual(acp.abandoned, [2])
+
+    def test_wait_prompt_local_down_fast_fail(self) -> None:
+        acp = self._bare_acp("qwen38-27b")
+        rid = 3
+        ev = threading.Event()
+        acp._pending[rid] = (ev, {})
+        acp._last_acp_event = time.time() - 20
+        with patch.object(d, "uses_local_text_llm", return_value=True):
+            with patch.object(d, "local_model_serving", return_value=False):
+                with patch.object(d, "local_llm_engine_state", return_value="down"):
+                    with patch.object(d, "load_user_models", return_value=("qwen38-27b", CATALOG)):
+                        t0 = time.time()
+                        with self.assertRaises(TimeoutError) as ctx:
+                            acp._wait_prompt(rid, ev, timeout=30)
+                        elapsed = time.time() - t0
+        self.assertIn("Local model is not running", str(ctx.exception))
+        self.assertLess(elapsed, 2.0)
+        self.assertEqual(acp.abandoned, [3])
+
+    def test_emit_local_activity_refreshes_acp_idle(self) -> None:
+        bot = types.SimpleNamespace(
+            model="qwen38-27b",
+            id="b_test",
+            status="",
+            surface="chat",
+            control="agent_controlled",
+            acp=types.SimpleNamespace(_last_acp_event=0.0, _turn_cancel=threading.Event()),
+            append_thought=lambda _t: None,
+        )
+        with patch.object(d, "emit"):
+            d.emit_local_activity(bot, "Thinking…")
+        self.assertGreater(bot.acp._last_acp_event, 0.0)
 
 
 LOCAL_ONLY = {

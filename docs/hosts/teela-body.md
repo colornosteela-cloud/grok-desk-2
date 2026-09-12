@@ -24,7 +24,7 @@ Grok 4.6 **cloud** is the default on this box's keys.
 
 ```bash
 # on teela-body
-grok login          # writes ~/.grok/auth.json on THIS host
+grok login          # writes ~/.grok/auth.json on THIS host; deskd shares that file with bots (do not copy it)
 ```
 
 `config.toml` default `grok-4.6` (cloud, empty `base_url`). Cloud keys are not `cluster_token`.

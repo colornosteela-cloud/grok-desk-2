@@ -10,7 +10,7 @@ Do not mix these up.
 | --- | --- | --- |
 | **Cluster token** | `~/.grok/desk.json` → Cluster tab | Shared mesh password. Generate **once**. Paste into **Cluster token** on the other hosts. |
 | UI Bearer | `$XDG_RUNTIME_DIR/grok-desk/token` | Automatic. The browser already has it. Ignore it. |
-| xAI / Grok cloud key | that host's `~/.grok/auth.json` (`grok login`) | How body/jetson *think*. Not the cluster token. |
+| xAI / Grok cloud key | that host's `~/.grok/auth.json` (`grok login`); bots **share** this file (symlink + `GROK_AUTH_PATH`), they must not get a second copy | How body/jetson *think*. Not the cluster token. |
 
 “Confirm current token” is **not** where you paste the new secret for teela-body. Leave it blank on first setup.
 

@@ -2,6 +2,11 @@
 
 This corrective release restores the **0.9.1-rc3 frontend behavior** and applies the requested UI changes as cosmetic/layout changes instead of replacing the frontend structure.
 
+## Fixes: long ACP turns and login after sleep
+
+- **ACP `session/prompt` timeout** is idle silence, not a 10-minute wall clock. Tokens, tools, thoughts, and local prefill ticks keep a coding turn alive. A dead local engine still fails in ~12s; a hung turn with no events still times out after 10 minutes of silence.
+- **Host `grok login` is shared**, not copied. Child ACP/TUI processes symlink `~/.grok/auth.json` (and its lock) and set `GROK_AUTH_PATH`. Byte-copying forked the OIDC refresh token: the first bot that refreshed revoked every other copy, which cleared credentials and forced `/login` after sleep.
+
 ## Autostart on reboot (teela-brain)
 
 Grok Desk is a **user systemd unit** (`contrib/grok-desk.service` → `~/.config/systemd/user/grok-desk.service`). On teela-brain it is **enabled** with `Restart=always`, starts after `teela-qwen38-27b.service` (Qwen 3.8 27B on `:8081`), and comes up at boot when lingering is on for that user (`loginctl enable-linger`).
