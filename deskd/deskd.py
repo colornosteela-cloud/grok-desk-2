@@ -79,7 +79,7 @@ def _llm_env(name: str, legacy: str, default: str) -> str:
     return val or default
 
 
-LOCAL_LLM_UPSTREAM = _llm_env("GROK_DESK", "GROK_DESK_VLLM", "http://127.0.0.1:8000").rstrip("/")
+LOCAL_LLM_UPSTREAM = _llm_env("GROK_DESK_LLM", "GROK_DESK_VLLM", "http://127.0.0.1:8000").rstrip("/")
 LOCAL_LLM_FAST_UPSTREAM = _llm_env("GROK_DESK_FAST", "GROK_DESK_VLLM_FAST", "http://127.0.0.1:8001").rstrip("/")
 LOCAL_LLM_SERVED = _llm_env("GROK_DESK_MODEL", "GROK_DESK_VLLM_MODEL", "qwen38")
 LOCAL_LLM_FAST_SERVED = _llm_env("GROK_DESK_FAST_MODEL", "GROK_DESK_VLLM_FAST_MODEL", "qwen3-vl-8b")

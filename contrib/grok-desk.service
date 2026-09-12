@@ -14,7 +14,7 @@ Environment=GROK_DESK_PORT=8742
 Environment=GROK_DESK_SANDBOX=off
 Environment=GROK_DESK_TEELA=%h/teela
 # Renamed from GROK_DESK_VLLM*; deskd still honors the old names.
-Environment=GROK_DESK=http://127.0.0.1:8081
+Environment=GROK_DESK_LLM=http://127.0.0.1:8081
 Environment=GROK_DESK_MODEL=Qwen3.8-27B
 Environment=GROK_DESK_MAX_LEN=262144
 Environment=GROK_DESK_MAX_TOKENS=32768

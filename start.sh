@@ -24,7 +24,7 @@ export GROK_DESKS="${GROK_DESKS:-$HOME/grok-desks}"
 export GROK_DESK_SANDBOX="${GROK_DESK_SANDBOX:-off}"
 # Local model upstream (llama.cpp, vLLM, or a key proxy in front of them).
 # Renamed from GROK_DESK_VLLM*; the old names are still honored by deskd.
-export GROK_DESK="${GROK_DESK:-${GROK_DESK_VLLM:-http://127.0.0.1:8081}}"
+export GROK_DESK_LLM="${GROK_DESK_LLM:-${GROK_DESK_VLLM:-http://127.0.0.1:8081}}"
 export GROK_DESK_MODEL="${GROK_DESK_MODEL:-${GROK_DESK_VLLM_MODEL:-Qwen3.8-27B}}"
 export GROK_DESK_MAX_LEN="${GROK_DESK_MAX_LEN:-${GROK_DESK_VLLM_MAX_LEN:-262144}}"
 export GROK_DESK_MAX_TOKENS="${GROK_DESK_MAX_TOKENS:-${GROK_DESK_VLLM_MAX_TOKENS:-32768}}"
