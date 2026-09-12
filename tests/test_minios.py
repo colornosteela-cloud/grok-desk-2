@@ -1747,7 +1747,7 @@ emit({type: 'usage', tps: 42.125, used: 12500, window: 1000000,
 assert.equal(bot.tps, 42.125);
 assert.equal(elements['tps-counter'].textContent, '42.1');
 assert.equal(tpsStat.title, '42.13 tok/s · provider-timing · provider-usage');
-assert.equal(elements['context-usage'].textContent, '13k / 1M 1.3%');
+assert.equal(elements['context-usage'].textContent, '13k / 1M');
 assert.equal(elements['context-meter-fill'].style.width, '1.25%');
 chunk(' more output '.repeat(1000));
 assert.equal(bot.tps, 42.125, 'character counts must not overwrite provider speed');

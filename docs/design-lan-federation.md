@@ -844,7 +844,7 @@ Remote bots are otherwise first-class: prompt, undo, clear, chats, soul, import/
 
 ### 11. Inference stays per-node (cognition ≠ mesh auth)
 
-Do not share vLLM. Brain's `/v1/llm` remains loopback-only to `GROK_DESK_VLLM` default `http://127.0.0.1:8000`. `_authorize` never treats a cluster header as loopback.
+Do not share vLLM. Brain's `/v1/llm` remains loopback-only to `GROK_DESK` default `http://127.0.0.1:8000`. `_authorize` never treats a cluster header as loopback.
 
 **Mixed cognition is the product, not a special case:**
 

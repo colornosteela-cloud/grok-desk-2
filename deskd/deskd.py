@@ -69,10 +69,20 @@ MODELS_DIR = Path(os.environ.get("GROK_DESK_MODELS", str(_LOGIN_HOME / "models")
 DESK_PORT = int(os.environ.get("GROK_DESK_PORT", "8742"))
 UI_ROOT = Path(__file__).resolve().parent.parent / "ui"
 SANDBOX = os.environ.get("GROK_DESK_SANDBOX", "off")  # off | strict (prototype default: off)
-LOCAL_LLM_UPSTREAM = os.environ.get("GROK_DESK_VLLM", "http://127.0.0.1:8000").rstrip("/")
-LOCAL_LLM_FAST_UPSTREAM = os.environ.get("GROK_DESK_VLLM_FAST", "http://127.0.0.1:8001").rstrip("/")
-LOCAL_LLM_SERVED = os.environ.get("GROK_DESK_VLLM_MODEL", "qwen38")
-LOCAL_LLM_FAST_SERVED = os.environ.get("GROK_DESK_VLLM_FAST_MODEL", "qwen3-vl-8b")
+def _llm_env(name: str, legacy: str, default: str) -> str:
+    # The local-model upstream is not always vLLM (llama.cpp, etc.), so these
+    # vars were renamed from GROK_DESK_VLLM*. Legacy names are still honored
+    # for existing units and launchers.
+    val = os.environ.get(name)
+    if val is None:
+        val = os.environ.get(legacy)
+    return val or default
+
+
+LOCAL_LLM_UPSTREAM = _llm_env("GROK_DESK", "GROK_DESK_VLLM", "http://127.0.0.1:8000").rstrip("/")
+LOCAL_LLM_FAST_UPSTREAM = _llm_env("GROK_DESK_FAST", "GROK_DESK_VLLM_FAST", "http://127.0.0.1:8001").rstrip("/")
+LOCAL_LLM_SERVED = _llm_env("GROK_DESK_MODEL", "GROK_DESK_VLLM_MODEL", "qwen38")
+LOCAL_LLM_FAST_SERVED = _llm_env("GROK_DESK_FAST_MODEL", "GROK_DESK_VLLM_FAST_MODEL", "qwen3-vl-8b")
 LOCAL_LLM_ALIASES = {
     "qwen38-hybrid": "qwen38-hybrid",
     "qwen38-27b": LOCAL_LLM_SERVED,
@@ -99,21 +109,21 @@ _VLLM_EXCLUSIVE_PORTS = {8000, 8001}
 _LLAMA_CPP_PORTS = {8080, 8081}
 # Grok Build will request remaining-context max_tokens (250k+). That hangs/kills
 # Intel XPU GDN kernels. Cap completions; prefill is still the full prompt.
-LOCAL_LLM_MAX_COMPLETION = int(os.environ.get("GROK_DESK_VLLM_MAX_TOKENS", "8192"))
+LOCAL_LLM_MAX_COMPLETION = int(_llm_env("GROK_DESK_MAX_TOKENS", "GROK_DESK_VLLM_MAX_TOKENS", "8192"))
 # Live Intel start.sh clamps 27B to 32768. Catalog still advertises 262144.
-LOCAL_LLM_MAX_MODEL_LEN = int(os.environ.get("GROK_DESK_VLLM_MAX_LEN", "32768"))
+LOCAL_LLM_MAX_MODEL_LEN = int(_llm_env("GROK_DESK_MAX_LEN", "GROK_DESK_VLLM_MAX_LEN", "32768"))
 # llama.cpp hybrid prefill is ~65 tok/s. A 10k Grok-ACP dump is ~2.5 minutes
 # before the first generated token. Keep interactive prompts far smaller; the
 # 262k window is for hard think, not MiniOS body turns.
-LOCAL_LLM_PREFILL_BUDGET = int(os.environ.get("GROK_DESK_VLLM_PREFILL", "1536"))
-LOCAL_LLM_MOTOR_PREFILL = int(os.environ.get("GROK_DESK_VLLM_MOTOR_PREFILL", "2048"))
+LOCAL_LLM_PREFILL_BUDGET = int(_llm_env("GROK_DESK_PREFILL", "GROK_DESK_VLLM_PREFILL", "1536"))
+LOCAL_LLM_MOTOR_PREFILL = int(_llm_env("GROK_DESK_MOTOR_PREFILL", "GROK_DESK_VLLM_MOTOR_PREFILL", "2048"))
 # Grok Build ACP prompts carry ~16k tokens of tool schemas. The MiniOS 1536
 # prefill dropped tool results and the local model called the same tools again.
-LOCAL_LLM_CODING_PREFILL = int(os.environ.get("GROK_DESK_VLLM_CODING_PREFILL", "24576"))
+LOCAL_LLM_CODING_PREFILL = int(_llm_env("GROK_DESK_CODING_PREFILL", "GROK_DESK_VLLM_CODING_PREFILL", "24576"))
 # Grok ACP throws Internal error / max_tokens_truncation on finish_reason=length.
 # Never honor a tiny Grok cap (we have seen 56). Motor replies must fit a tool call.
-LOCAL_LLM_MIN_COMPLETION = int(os.environ.get("GROK_DESK_VLLM_MIN_TOKENS", "1024"))
-LOCAL_LLM_MOTOR_MAX_TOKENS = int(os.environ.get("GROK_DESK_VLLM_MOTOR_MAX_TOKENS", "1024"))
+LOCAL_LLM_MIN_COMPLETION = int(_llm_env("GROK_DESK_MIN_TOKENS", "GROK_DESK_VLLM_MIN_TOKENS", "1024"))
+LOCAL_LLM_MOTOR_MAX_TOKENS = int(_llm_env("GROK_DESK_MOTOR_MAX_TOKENS", "GROK_DESK_VLLM_MOTOR_MAX_TOKENS", "1024"))
 _CTX_OVERFLOW_RE = re.compile(
     r"maximum context length is (\d+) tokens\..*?"
     r"requested (\d+) output tokens.*?"
