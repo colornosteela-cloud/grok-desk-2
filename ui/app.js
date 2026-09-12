@@ -1863,9 +1863,8 @@ function renderMeta(b) {
   const max = Number(b.context_window) || 0;
   const pct = Math.min(100, Math.max(0, max > 0 && Number.isFinite(used) ? (used / max) * 100 : 0));
   const usage = $("context-usage");
-  const pctLabel = max > 0 ? pct.toFixed(pct < 10 ? 1 : 0) + "%" : "";
   if (usage) {
-    usage.textContent = max ? `${fmtCtx(used)} / ${fmtCtx(max)} ${pctLabel}`.trim() : fmtCtx(used);
+    usage.textContent = max ? `${fmtCtx(used)} / ${fmtCtx(max)}` : fmtCtx(used);
     usage.title = `${used} / ${max} (${pct.toFixed(2)}%) · ${b.context_source || "unknown"}`;
   }
   const ctxStat = document.querySelector(".context-stat");
