@@ -1835,6 +1835,32 @@ function botIsRemote(b) {
   return !!(b && b.remote && home && state.nodeName && home !== state.nodeName);
 }
 
+function isCloudPickerRow(m) {
+  if (!m) return false;
+  if (m.local === false) return true;
+  const id = String(m.id || "").toLowerCase();
+  return id.startsWith("grok");
+}
+
+function mergePickerModels(incoming, previous) {
+  const rows = Array.isArray(incoming) ? incoming.map((m) => ({ ...m })) : [];
+  const have = new Set(rows.map((m) => String(m.id || "")).filter(Boolean));
+  for (const m of previous || []) {
+    const id = String(m?.id || "");
+    if (!id || have.has(id)) continue;
+    if (!isCloudPickerRow(m)) continue;
+    rows.push({
+      ...m,
+      local: false,
+      available: m.available !== false,
+      running: false,
+      startable: false,
+    });
+    have.add(id);
+  }
+  return rows;
+}
+
 function modelsForBot(b) {
   if (b && Array.isArray(b.models) && b.models.length) return b.models;
   if (b && !botIsRemote(b)) return state.catalog || [];
@@ -1847,8 +1873,8 @@ async function catalogForBot(b) {
     return api(`/v1/cluster/peer-models?peer=${encodeURIComponent(home)}`);
   }
   const cat = await api("/v1/models");
-  state.catalog = cat.models || [];
-  return cat;
+  state.catalog = mergePickerModels(cat.models || [], state.catalog);
+  return { ...cat, models: state.catalog };
 }
 
 function renderMeta(b) {
@@ -2142,18 +2168,19 @@ async function switchBotModel(b, id) {
 }
 
 async function refreshLocalModelCatalog(b) {
+  const prev = b.models || [];
   try {
     const st = await api("/v1/local-llm/status");
     b.llmError = st.error || "";
-    if (Array.isArray(st.models) && st.models.length) b.models = st.models;
+    if (Array.isArray(st.models) && st.models.length) b.models = mergePickerModels(st.models, prev);
     else {
       const cat = await catalogForBot(b);
-      if (Array.isArray(cat.models) && cat.models.length) b.models = cat.models;
+      if (Array.isArray(cat.models) && cat.models.length) b.models = mergePickerModels(cat.models, prev);
     }
   } catch {
     try {
       const cat = await catalogForBot(b);
-      if (Array.isArray(cat.models) && cat.models.length) b.models = cat.models;
+      if (Array.isArray(cat.models) && cat.models.length) b.models = mergePickerModels(cat.models, prev);
     } catch { /* keep last catalog */ }
   }
   renderMeta(b);
@@ -7246,7 +7273,8 @@ function connectEvents() {
       }
     }
     if (msg.type === "models.updated" && Array.isArray(msg.models)) {
-      for (const b of state.bots) b.models = msg.models;
+      state.catalog = mergePickerModels(msg.models, state.catalog);
+      for (const b of state.bots) b.models = mergePickerModels(msg.models, b.models);
       const cur = state.bots.find((x) => x.id === state.selected);
       if (cur) renderMeta(cur);
     }

@@ -969,11 +969,30 @@ class HostCatalogTests(unittest.TestCase):
         default, rows = d.host_picker_models(LOCAL_ONLY, "qwen38-27b", live_ids=("qwen38",))
         ids = [r["id"] for r in rows]
         self.assertEqual(default, "qwen38-27b")
-        self.assertEqual(ids, ["qwen38-27b", "muse-glimmer"])
-        self.assertNotIn("grok-4.6", ids)
-        self.assertNotIn("grok-4.5", ids)
+        self.assertEqual(ids[:2], ["qwen38-27b", "muse-glimmer"])
+        self.assertIn("grok-4.6", ids)
+        self.assertIn("grok-4.5", ids)
         self.assertTrue(rows[0]["available"])
         self.assertFalse(rows[1]["available"])
+        grok = next(r for r in rows if r["id"] == "grok-4.6")
+        self.assertTrue(grok["available"])
+        self.assertFalse(grok["local"])
+
+    def test_host_picker_keeps_config_cloud_grok(self) -> None:
+        catalog = {
+            **LOCAL_ONLY,
+            "grok-4.6": {"model": "grok-4.6", "name": "Grok 4.6", "api_backend": "responses", "context_window": 500000},
+            "grok-4.5": {"model": "grok-4.5", "name": "Grok 4.5", "api_backend": "responses", "context_window": 256000},
+        }
+        default, rows = d.host_picker_models(catalog, "grok-4.6", live_ids=("qwen38",))
+        ids = [r["id"] for r in rows]
+        self.assertEqual(default, "grok-4.6")
+        self.assertIn("qwen38-27b", ids)
+        self.assertIn("grok-4.6", ids)
+        self.assertIn("grok-4.5", ids)
+        grok = next(r for r in rows if r["id"] == "grok-4.6")
+        self.assertTrue(grok["available"])
+        self.assertFalse(grok["local"])
 
     def test_host_picker_hides_distill_alias(self) -> None:
         catalog = {
@@ -997,7 +1016,7 @@ class HostCatalogTests(unittest.TestCase):
         )
         ids = [r["id"] for r in rows]
         self.assertIn("grok-4.6", ids)
-        self.assertNotIn("grok-4.5", ids)
+        self.assertIn("grok-4.5", ids)
         grok = next(r for r in rows if r["id"] == "grok-4.6")
         self.assertTrue(grok["available"])
 
@@ -1011,23 +1030,27 @@ class HostCatalogTests(unittest.TestCase):
                         "availableModels": [
                             {"modelId": "grok-4.6", "name": "Grok 4.6"},
                             {"modelId": "grok-4.5", "name": "Grok 4.5"},
+                            {"modelId": "grok-code-fast-1", "name": "Grok Code Fast 1"},
                         ],
                     }
                 )
         ids = [m["id"] for m in bot.models]
         self.assertEqual(bot.model, "qwen38-27b")
-        self.assertEqual(ids, ["qwen38-27b", "muse-glimmer"])
-        self.assertNotIn("grok-4.6", ids)
-        self.assertNotIn("grok-4.5", ids)
+        self.assertIn("qwen38-27b", ids)
+        self.assertIn("muse-glimmer", ids)
+        self.assertIn("grok-4.6", ids)
+        self.assertIn("grok-4.5", ids)
+        self.assertNotIn("grok-code-fast-1", ids)
 
     def test_ensure_model_on_host_rejects_foreign(self) -> None:
         with patch.object(d, "load_user_models", return_value=("qwen38-27b", LOCAL_ONLY)):
             with patch.object(d, "probe_local_llm_ids", return_value=("qwen38",)):
                 d.ensure_model_on_host("qwen38-27b")
+                d.ensure_model_on_host("grok-4.6")
+                d.ensure_model_on_host("grok-4.5")
                 with self.assertRaises(ValueError) as ctx:
-                    d.ensure_model_on_host("grok-4.6")
+                    d.ensure_model_on_host("not-a-real-model")
                 self.assertIn("unknown model", str(ctx.exception))
-                d.ensure_model_on_host("grok-4.6", allow_current="grok-4.6")
 
     def test_body_loopback_occupancy_does_not_assume_qwen(self) -> None:
         picker = [

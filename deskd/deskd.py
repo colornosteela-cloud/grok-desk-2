@@ -1164,7 +1164,7 @@ def ensure_model_on_host(
     _, catalog = load_user_models()
     tbl = catalog.get(mid) if isinstance(catalog.get(mid), dict) else {}
     if mid not in catalog and mid != (allow_current or ""):
-        if bot_kind_is_grok_build(bot) and looks_like_cloud_model(mid, tbl):
+        if str(mid).lower().startswith("grok") and looks_like_cloud_model(mid, tbl):
             return
         raise ValueError(f"unknown model {mid}")
     if bot_kind_is_grok_build(bot) and not is_exclusive_vllm_model(mid, tbl):
@@ -2001,13 +2001,38 @@ def current_model_effort(bot: Any) -> str:
     return ""
 
 
+_GROK_CLOUD_PICKER = (
+    ("grok-4.6", "Grok 4.6", 500000),
+    ("grok-4.5", "Grok 4.5", 256000),
+)
+
+
+def _append_grok_cloud_picker_rows(
+    rows: list[dict[str, Any]],
+    catalog: dict[str, Any] | None,
+) -> None:
+    """Always offer Grok 4.6 / 4.5 (cloud via grok login) even if config.toml omitted them."""
+    have = {str(r.get("id") or "") for r in rows}
+    for mid, name, ctx in _GROK_CLOUD_PICKER:
+        if mid in have:
+            continue
+        raw = (catalog or {}).get(mid)
+        row: dict[str, Any] = {"id": mid, "name": name, "context_window": ctx}
+        if isinstance(raw, dict):
+            row["name"] = raw.get("name") or name
+            row["context_window"] = raw.get("context_window") or ctx
+            row.update(model_effort_info(raw))
+        rows.append(row)
+        have.add(mid)
+
+
 def host_picker_models(
     catalog: dict[str, Any] | None = None,
     default: str | None = None,
     live_ids: tuple[str, ...] | None = None,
     extra_ids: list[str] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
-    """This host's picker: config.toml only. No grok-4.6/4.5 auto-inject."""
+    """This host's picker: config.toml plus Grok 4.6 / 4.5 cloud rows."""
     if catalog is None:
         loaded_default, catalog = load_user_models()
         if default is None:
@@ -2038,6 +2063,7 @@ def host_picker_models(
             if isinstance(raw, dict):
                 extra.update(model_effort_info(raw))
             rows.append(extra)
+    _append_grok_cloud_picker_rows(rows, catalog)
     want = (default or "").strip()
     ids = {r["id"] for r in rows}
     if want.lower() in _HIDDEN_PICKER_IDS and "qwen3-vl-8b" in ids:
