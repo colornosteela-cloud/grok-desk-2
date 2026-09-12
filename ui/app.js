@@ -1501,12 +1501,8 @@ document.addEventListener("keydown", (e) => {
 });
 
 function nodeChipHTML(b) {
-  if (!b?.node || b.peer_stub) return "";
-  const peers = state.peers || [];
-  if (!b.remote && !peers.length) return "";
-  const off = b.node_status && b.node_status !== "ok" ? " (offline)" : "";
-  const cls = "node-chip" + (b.remote ? " remote" : " local") + (b.node_status && b.node_status !== "ok" ? " offline" : "");
-  return `<span class="${cls}">${escapeHtml(b.node)}${off}</span>`;
+  // Host (teela-brain / teela-body) already lives in the chat header subtitle.
+  return "";
 }
 
 function peerPlaceholderBots() {
@@ -1943,6 +1939,7 @@ function renderMeta(b) {
     if (b.token_source) bits.push(b.token_source);
     tpsStat.title = bits.join(" · ");
   }
+  if (window.WorkingMemory) WorkingMemory.syncFromBot(b);
   const sel = $("model-select");
   const list = modelsForBot(b);
   if (sel) {
@@ -7299,7 +7296,11 @@ function connectEvents() {
         if (typeof msg.tps === "number" && Number.isFinite(msg.tps) && msg.tps >= 0) b.tps = msg.tps;
         if (msg.speed_source) b.speed_source = msg.speed_source;
         if (msg.token_source) b.token_source = msg.token_source;
+        if (msg.pressure) b.wm_pressure = msg.pressure;
+        if (typeof msg.utilization === "number" && Number.isFinite(msg.utilization)) b.wm_utilization = msg.utilization;
+        if (typeof msg.free_tokens === "number" && Number.isFinite(msg.free_tokens)) b.wm_free = msg.free_tokens;
         if (state.selected === b.id) renderMeta(b);
+        if (window.WorkingMemory) WorkingMemory.onUsage(msg, b);
       }
     }
     if (msg.type === "models.updated" && Array.isArray(msg.models)) {

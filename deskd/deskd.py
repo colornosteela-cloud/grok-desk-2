@@ -62,6 +62,8 @@ from cluster import (
     validate_peer_url,
 )
 import memory as botmem
+import working_memory as wm
+import context_manager as cm
 
 _LOGIN_HOME = resolve_login_home()
 GROK_BIN = resolve_grok_bin()
@@ -3429,9 +3431,11 @@ def save_body_lesson(bot: Any, lesson: dict[str, Any] | None) -> dict[str, Any] 
 
 def learn_from_user(bot: Any, text: str, prior: str | None = None) -> dict[str, Any] | None:
     lesson = extract_body_lesson(text, getattr(bot, "robot_state", None), prior)
-    if not lesson:
-        return None
-    return save_body_lesson(bot, lesson)
+    saved = save_body_lesson(bot, lesson) if lesson else None
+    if saved or _looks_like_embodied_correction(text):
+        note = str((saved or {}).get("note") or text or "")
+        attach_embodied_user_correction(bot, note)
+    return saved
 
 
 def recall_body_facts(bot: Any, query: str = "", *, limit: int = 6) -> list[str]:
@@ -4798,6 +4802,229 @@ def teela_publish_body(bot: Any, *, last_action: str | None = None, measured: di
     return store.snapshot()
 
 
+def _sm_joint(snap: Any, name: str) -> float | None:
+    if not isinstance(snap, dict):
+        return None
+    joints = snap.get("joints") if isinstance(snap.get("joints"), dict) else {}
+    rec = joints.get(name)
+    if isinstance(rec, dict):
+        try:
+            return float(rec.get("actual"))
+        except (TypeError, ValueError):
+            return None
+    try:
+        return float(rec)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sm_head(snap: Any) -> dict[str, Any]:
+    return {
+        "head_pan": _sm_joint(snap, "neck_pan"),
+        "head_tilt": _sm_joint(snap, "neck_tilt"),
+        "pose": (snap or {}).get("pose") if isinstance(snap, dict) else None,
+        "revision": (snap or {}).get("revision") if isinstance(snap, dict) else None,
+    }
+
+
+def _capture_sensorimotor_before(bot: Any) -> dict[str, Any] | None:
+    if getattr(bot, "_sm_before", None) is not None:
+        return getattr(bot, "_sm_before")
+    try:
+        snap = teela_body_snapshot(bot)
+    except Exception:
+        snap = {"joints": dict((getattr(bot, "robot_state", None) or {}).get("joints") or {})}
+    setattr(bot, "_sm_before", snap)
+    setattr(bot, "_sm_t0", time.time())
+    return snap
+
+
+_SKILL_ALIASES = {
+    "gaze.look": "look_at_user",
+    "orient_head": "look_at_user",
+    "look_at": "look_at_user",
+    "look": "look_at_user",
+    "gesture.wave": "wave",
+    "teela_gesture": "wave",
+}
+
+
+def _canon_skill(sid: str) -> str:
+    s = str(sid or "").strip()
+    low = s.lower()
+    if low in _SKILL_ALIASES:
+        return _SKILL_ALIASES[low]
+    tail = low.rsplit(".", 1)[-1]
+    return _SKILL_ALIASES.get(tail, s or "body_action")
+
+
+def _episode_goal(skill: str, params: dict[str, Any] | None, command: str) -> str:
+    params = params if isinstance(params, dict) else {}
+    s = str(skill or command or params.get("skill") or params.get("gesture") or "").strip().lower()
+    joint = str(params.get("joint") or "").lower()
+    if s in {"orient_head", "look_at", "look_at_user"} or joint == "neck_pan" or "look" in s or "gaze" in s:
+        return "look_at_user"
+    if s in {"wave", "greeting", "teela_gesture"} or "wave" in s:
+        return "wave"
+    return _canon_skill(s or "body_action")
+
+
+def record_minios_sensorimotor(
+    bot: Any,
+    *,
+    skill: str,
+    command: str,
+    params: dict[str, Any] | None,
+    result: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Closed-loop episode: command sent is not success. MiniOS telemetry decides."""
+    before = getattr(bot, "_sm_before", None)
+    setattr(bot, "_sm_before", None)
+    t0 = float(getattr(bot, "_sm_t0", 0) or 0)
+    setattr(bot, "_sm_t0", None)
+    try:
+        import cognitive_profile as _cprof
+        import embodied_memory as emem
+    except Exception:
+        return None
+    if not _cprof.has_cap(bot, "sensorimotor_memory"):
+        return None
+    try:
+        after = teela_body_snapshot(bot)
+    except Exception:
+        after = {}
+    params = dict(params or {})
+    result = result if isinstance(result, dict) else {}
+    status = str(result.get("status") or "")
+    goal = _episode_goal(skill, params, command)
+    before_h = _sm_head(before)
+    after_h = _sm_head(after)
+    target = params.get("pan_deg")
+    if target is None and str(params.get("joint") or "").lower() == "neck_pan":
+        target = params.get("value") if params.get("value") is not None else params.get("degrees")
+    error = None
+    try:
+        if target is not None and after_h.get("head_pan") is not None:
+            error = abs(float(after_h["head_pan"]) - float(target))
+    except (TypeError, ValueError):
+        error = None
+    settle_ms = None
+    if t0:
+        settle_ms = int(max(0.0, (time.time() - t0) * 1000))
+    executing = status in {"executing", "started"} and result.get("ok") is not True
+    rejected = status in {"rejected", "error"} or result.get("ok") is False
+    reached = bool(isinstance(after, dict) and after.get("target_reached"))
+    moved = before_h.get("head_pan") != after_h.get("head_pan") or (before or {}).get("pose") != (after or {}).get("pose")
+    success = False
+    if rejected or executing:
+        success = False
+    elif error is not None:
+        success = error <= 6.0
+    elif reached or (result.get("ok") is True and moved):
+        success = True
+    ep = emem.for_bot(bot).record_episode(
+        {
+            "goal": goal,
+            "before": before_h,
+            "action": {
+                "skill": skill or goal,
+                "command": command or skill,
+                "params": {k: params[k] for k in list(params)[:12]},
+                "target": target,
+            },
+            "actual_result": after_h,
+            "perception_after": {
+                "user_centered": bool(error is not None and error <= 6.0),
+                "target_reached": reached,
+            },
+            "outcome": {
+                "success": success,
+                "status": status or ("ok" if result.get("ok") else ""),
+                "command_sent": True,
+            },
+            "metrics": {
+                "settle_time_ms": settle_ms,
+                "final_error_deg": error,
+                "target_error_deg": error,
+            },
+            "source": "MINIOS",
+            "force": True,
+        }
+    )
+    if success and _cprof.has_cap(bot, "motor_learning"):
+        try:
+            emem.for_bot(bot).validate_from_episode(goal, ep)
+        except Exception:
+            pass
+    return ep
+
+
+def _infer_correction_skill(bot: Any, text: str) -> str:
+    t = (text or "").lower()
+    try:
+        rec = _teela_attempt_store(bot).latest()
+        if rec is not None and rec.skill:
+            return _canon_skill(str(rec.skill))
+    except Exception:
+        pass
+    if any(w in t for w in ("look", "head", "gaze", "face me", "toward me")):
+        return "look_at_user"
+    if "wave" in t:
+        return "wave"
+    return "look_at_user"
+
+
+def attach_embodied_user_correction(bot: Any, text: str, *, skill_id: str | None = None) -> dict[str, Any] | None:
+    try:
+        import cognitive_profile as _cprof
+        import embodied_memory as emem
+        import memory as botmem
+    except Exception:
+        return None
+    if not _cprof.has_cap(bot, "motor_learning"):
+        return None
+    note = (text or "").strip()
+    if not note:
+        return None
+    sid = _canon_skill(skill_id or _infer_correction_skill(bot, note))
+    try:
+        sk = emem.for_bot(bot).apply_user_correction(sid, note)
+    except Exception:
+        return None
+    try:
+        emem.for_bot(bot).record_episode(
+            {
+                "goal": sid,
+                "action": {"skill": sid, "command": "user_correction"},
+                "outcome": {"success": False, "user_correction": True},
+                "user_feedback": note,
+                "source": "USER_CORRECTION",
+                "force": True,
+            }
+        )
+    except Exception:
+        pass
+    return sk
+
+
+def _looks_like_embodied_correction(text: str) -> bool:
+    try:
+        import memory as botmem
+
+        if botmem.looks_like_correction(text):
+            return True
+    except Exception:
+        pass
+    t = (text or "").lower()
+    return bool(
+        re.search(
+            r"\b(?:too (?:high|low|fast|slow)|not like that|you (?:should|forgot)|"
+            r"turn your head|orient (?:the )?head|when i ask you)\b",
+            t,
+        )
+    )
+
+
 def teela_capability_tool_specs() -> list[dict[str, Any]]:
     """Unified Teela capabilities: perception, body, computer, memory, collab, system."""
     specs = (
@@ -4830,6 +5057,7 @@ def dispatch_teela_minios_tool(bot: Any, name: str, args: dict[str, Any] | None)
             skill = "stop"
         elif short == "teela_gesture":
             skill = "gesture"
+        _capture_sensorimotor_before(bot)
         timeout = virtual_body.settle_timeout(skill)
         result = virtual_body.submit_action(bid, skill, args, timeout=timeout)
         st = getattr(bot, "robot_state", None)
@@ -4837,6 +5065,16 @@ def dispatch_teela_minios_tool(bot: Any, name: str, args: dict[str, Any] | None)
             virtual_body.apply_to_robot(st, virtual_body.latest_state(bid))
         try:
             teela_publish_body(bot, last_action=str(args.get("gesture") or skill or ""))
+        except Exception:
+            pass
+        try:
+            record_minios_sensorimotor(
+                bot,
+                skill=skill,
+                command=short,
+                params=args,
+                result=result if isinstance(result, dict) else {},
+            )
         except Exception:
             pass
         orch.note(
@@ -4896,6 +5134,7 @@ def dispatch_teela_minios_tool(bot: Any, name: str, args: dict[str, Any] | None)
             if args.get("steps"):
                 body["steps"] = args.get("steps")
         body = fill_robot_action_from_intent(bot, body)
+        _capture_sensorimotor_before(bot)
         result, ev = bot.apply_robot(body)
         emit(ev)
         if isinstance(getattr(bot, "robot_state", None), dict):
@@ -4904,6 +5143,16 @@ def dispatch_teela_minios_tool(bot: Any, name: str, args: dict[str, Any] | None)
                 teela_publish_body(bot, last_action=str(body.get("cmd") or body.get("pose") or ""))
             except Exception:
                 pass
+        try:
+            record_minios_sensorimotor(
+                bot,
+                skill=str(body.get("cmd") or body.get("pose") or short),
+                command=short,
+                params={**args, **body},
+                result=result if isinstance(result, dict) else {},
+            )
+        except Exception:
+            pass
         return result if isinstance(result, dict) else {"ok": True}
     if short == "teela_system_check":
         intent = ""
@@ -5443,6 +5692,14 @@ def teela_handle_feedback_turn(bot: Any, text: str) -> str | None:
         executor=lambda plan: _teela_plan_executor(bot, plan, text),
         observer=lambda: _teela_observer(bot),
     )
+    if result.handled or _looks_like_embodied_correction(text):
+        skill_id = None
+        if getattr(result, "skill", None) is not None:
+            skill_id = getattr(result.skill, "skill_id", None)
+        if not skill_id:
+            rec = attempts.latest()
+            skill_id = getattr(rec, "skill", None) if rec is not None else None
+        attach_embodied_user_correction(bot, text, skill_id=str(skill_id) if skill_id else None)
     if not result.handled:
         return None
     setattr(bot, "_teela_feedback_result", result)
@@ -5922,17 +6179,25 @@ def assemble_teela_executive_payload(
     policy: Any = None,
 ) -> dict[str, Any]:
     """One context for every Teela turn: I-feel, memory, environment, all capabilities."""
-    st = virtual_body.overlay(
-        str(getattr(bot, "id", "") or ""),
-        getattr(bot, "robot_state", None),
-    )
-    feel = proprioception_block(st, kind="live")
+    feel = ""
     try:
-        import body_state as _bs
+        import cognitive_profile as _cprof
 
-        feel = feel + "\n" + _bs.compact_block(teela_body_snapshot(bot))
+        embodied = _cprof.has_cap(bot, "body_state")
     except Exception:
-        pass
+        embodied = True
+    if embodied:
+        st = virtual_body.overlay(
+            str(getattr(bot, "id", "") or ""),
+            getattr(bot, "robot_state", None),
+        )
+        feel = proprioception_block(st, kind="live")
+        try:
+            import body_state as _bs
+
+            feel = feel + "\n" + _bs.compact_block(teela_body_snapshot(bot))
+        except Exception:
+            pass
     env = {
         "surface": getattr(bot, "surface", "") or "",
         "cursor": getattr(bot, "desktop_cursor", {}) or {},
@@ -5962,7 +6227,12 @@ def assemble_teela_executive_payload(
             "Do not say those labels out loud."
         )
     messages: list[dict[str, Any]] = [{"role": "system", "content": sys}]
-    for m in recent_chat_messages(bot, limit=8):
+    try:
+        cm.before_assemble(bot, user_text)
+        chat_limit = cm.conversation_turn_limit(bot)
+    except Exception:
+        chat_limit = 8
+    for m in recent_chat_messages(bot, limit=chat_limit):
         messages.append({"role": m["role"], "content": m["content"]})
     user = (user_text or "").strip()
     if images:
@@ -5982,16 +6252,25 @@ def assemble_teela_executive_payload(
         and not getattr(policy, "needs_memory", False)
     )
     mgr = getattr(bot, "memory", None)
+    assembled = None
     if mgr is not None and not skip_mem:
         try:
-            assembled = mgr.observe_and_assemble(
+            assembled = cm.assemble_for_bot(
+                bot,
                 payload.get("messages") or [],
                 user_text,
-                botmem.TokenBudget.for_model(str(getattr(bot, "model", "") or "")),
             )
             payload = botmem.inject_assembled_messages(payload, assembled)
         except Exception as e:
             print(f"[deskd] executive memory inject failed: {e}", flush=True)
+    try:
+        payload = cm.inject_checkpoint_message(payload, bot)
+    except Exception:
+        pass
+    try:
+        wm.capture_turn(bot, payload, assembled)
+    except Exception as e:
+        print(f"[deskd] working-memory capture failed: {e}", flush=True)
     return payload
 
 
@@ -6400,6 +6679,14 @@ def _teela_minios_continue(
         if _round == nrounds:
             payload["tool_choice"] = "none"
         data = complete(payload)
+        if isinstance(data, dict):
+            usage = data.get("usage")
+            ingest = getattr(bot, "ingest_usage", None)
+            if isinstance(usage, dict) and usage and callable(ingest):
+                try:
+                    ingest(usage)
+                except Exception:
+                    pass
         if not data:
             setattr(bot, "_teela_tools_used", used)
             return last_line or None
@@ -12503,6 +12790,10 @@ class Bot:
     def apply_robot(self, body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         echo = robot_sim.is_plan_echo(self.robot_state, body)
         incoming = str(body.get("cmd") or body.get("command") or "").strip().lower()
+        sm_owned = False
+        if incoming not in {"", "status", "state", "live", "telemetry"} and getattr(self, "_sm_before", None) is None:
+            _capture_sensorimotor_before(self)
+            sm_owned = True
         keep_plan = incoming in {"", "status", "state", "live", "telemetry"} or bool(body.get("_plan_step")) or echo
         if not keep_plan:
             old = getattr(self, "_plan_timer", None)
@@ -12583,6 +12874,21 @@ class Bot:
         out["spoken"] = robot_sim.describe_body(self.robot_state)
         out["live"] = dict(result.get("live") or (self.robot_state.get("live") or {}))
         out["next"] = "Call desktop_watch to see the MiniOS robot move."
+        if sm_owned:
+            try:
+                teela_publish_body(self, last_action=str(cmd or incoming))
+            except Exception:
+                pass
+            try:
+                record_minios_sensorimotor(
+                    self,
+                    skill=str(cmd or incoming),
+                    command=str(cmd or incoming),
+                    params=dict(body),
+                    result=out,
+                )
+            except Exception:
+                pass
         return out, ev
 
     def timeline_path(self) -> Path:
@@ -14449,6 +14755,12 @@ class Bot:
             "output_tokens": (self.telemetry or {}).get("output_tokens"),
             "models": annotate_model_availability(self.models),
         }
+        try:
+            extra = wm.note_occupancy(self)
+            if extra:
+                event.update(extra)
+        except Exception:
+            pass
         emit(event)
         if log:
             print(
@@ -15414,7 +15726,15 @@ class Handler(BaseHTTPRequestHandler):
     def _authorize(self) -> str:
         """Return 'public' | 'ui' | 'ui_local' | 'cluster' | 'deny'. Never OR secrets."""
         path = urlparse(self.path).path
-        if path in ("/", "/index.html", "/app.js", "/styles.css", "/grokbot.css", "/grokbot-ui.js") or path.startswith(
+        if path in (
+            "/",
+            "/index.html",
+            "/app.js",
+            "/styles.css",
+            "/grokbot.css",
+            "/grokbot-ui.js",
+            "/working-memory.js",
+        ) or path.startswith(
             ("/ui/", "/assets/", "/vendor/")
         ):
             return "public"
@@ -15425,6 +15745,12 @@ class Handler(BaseHTTPRequestHandler):
                 return "deny"
             if self._ui_ok() and self._is_loopback():
                 return "ui_local"
+            return "deny"
+        if path.startswith("/v1/debug/context") or "/working-memory" in path:
+            if self._cluster_header_present():
+                return "deny"
+            if self._ui_ok():
+                return self._ui_role()
             return "deny"
         if path == "/v1/bootstrap":
             if self._cluster_header_present():
@@ -16071,12 +16397,28 @@ class Handler(BaseHTTPRequestHandler):
                     motor = local_llm_motor_turn(payload)
                     if not motor:
                         try:
-                            assembled = bot.memory.observe_and_assemble(
-                                payload.get("messages") or [],
-                                "",
-                                botmem.TokenBudget.for_model(bot.model),
-                            )
+                            try:
+                                cm.before_assemble(bot, "")
+                                assembled = cm.assemble_for_bot(
+                                    bot,
+                                    payload.get("messages") or [],
+                                    "",
+                                )
+                            except Exception:
+                                assembled = bot.memory.observe_and_assemble(
+                                    payload.get("messages") or [],
+                                    "",
+                                    botmem.TokenBudget.for_model(bot.model),
+                                )
                             payload = botmem.inject_assembled_messages(payload, assembled)
+                            try:
+                                payload = cm.inject_checkpoint_message(payload, bot)
+                            except Exception:
+                                pass
+                            try:
+                                wm.capture_turn(bot, payload, assembled)
+                            except Exception:
+                                pass
                         except Exception:
                             pass
                     payload = inject_live_body(payload, bot)
@@ -16476,6 +16818,42 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
+    def _handle_working_memory(self, path: str) -> None:
+        """UI-auth read-only manifest. Not loopback-only (LAN UI must reach it). Cluster denied."""
+        if self._cluster_header_present():
+            return self._json(403, {"error": "working memory is host-local"})
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        parts = [p for p in path.split("/") if p]
+        bot = None
+        rest = ""
+        if len(parts) >= 2 and parts[0] == "v1" and parts[1] == "debug" and (len(parts) == 2 or parts[2] == "context"):
+            bid = (qs.get("bot_id") or qs.get("bot") or [""])[0].strip()
+            if not bid:
+                return self._json(400, {"error": "bot_id required"})
+            bot = bots.get(bid)
+            rest = "/".join(parts[3:]) if len(parts) > 3 else ""
+        elif len(parts) >= 4 and parts[0] == "v1" and parts[1] == "bots" and parts[3] == "working-memory":
+            bot = bots.get(parts[2])
+            rest = "/".join(parts[4:])
+        else:
+            return self._json(404, {"error": "not found"})
+        if bot is None:
+            return self._json(404, {"error": "not found"})
+        if self.command != "GET":
+            self._drain()
+            return self._json(405, {"error": "method not allowed"})
+        try:
+            payload = wm.handle_get(bot, rest, qs)
+        except Exception as e:
+            print(f"[deskd] working-memory GET failed: {e}", flush=True)
+            return self._json(500, {"error": "working memory unavailable"})
+        if isinstance(payload, dict) and payload.get("error") == "not found":
+            return self._json(404, payload)
+        if isinstance(payload, dict) and payload.get("status") == "not_found":
+            return self._json(404, payload)
+        return self._json(200, payload)
+
     def _handle_memory(self) -> None:
         """Loopback-only per-bot facts. Never a cluster or UI-origin resource."""
         if self._cluster_header_present() or not self._is_loopback():
@@ -16663,7 +17041,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._static(UI_ROOT / path[4:])
         if path.startswith("/vendor/"):
             return self._static(UI_ROOT / path.lstrip("/"))
-        if path in ("/app.js", "/styles.css", "/grokbot.css", "/grokbot-ui.js"):
+        if path in ("/app.js", "/styles.css", "/grokbot.css", "/grokbot-ui.js", "/working-memory.js"):
             return self._static(UI_ROOT / path.lstrip("/"))
         if path == "/v1/models":
             default, catalog = load_user_models()
@@ -16736,6 +17114,10 @@ class Handler(BaseHTTPRequestHandler):
             if not bot:
                 return self._json(404, {"error": "not found"})
             return self._json(200, bot.telemetry_snapshot())
+        if path.startswith("/v1/bots/") and "/working-memory" in path:
+            return self._handle_working_memory(path)
+        if path.startswith("/v1/debug/context"):
+            return self._handle_working_memory(path)
         if path.startswith("/v1/bots/") and path.endswith("/workspace-shares"):
             bid = path.split("/")[3]
             bot = bots.get(bid)
@@ -17998,6 +18380,10 @@ class Handler(BaseHTTPRequestHandler):
         else:
             bot.append_msg("assistant", text)
             emit({"type": "chat", "bot_id": bot.id, "role": "assistant", "text": text})
+        try:
+            bot.record_local_generation(text or "", started_ms=time.time() * 1000.0)
+        except Exception:
+            pass
         bot._motor_hold = False
         nxt = bot.finish_prompt_turn()
         if nxt:

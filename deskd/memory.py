@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -18,9 +19,12 @@ import urllib.error
 import urllib.request
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
+
+import telemetry as tel
 
 DEFAULT_COMPACT_THRESHOLD = 4000
 DEFAULT_MIN_VERBATIM = 4
@@ -29,6 +33,18 @@ TOOL_RESULT_HARD_MAX = 8000
 TIER3_BUDGET_FRACTION = 0.10
 MAX_OVERFLOW_TURNS = 24
 SESSION_MEMORY_MARK = "# Session memory"
+DEFAULT_MAX_RETRIEVE = 3
+DEFAULT_MIN_RELEVANCE = 0.22
+_CORRECTION_RE = re.compile(
+    r"(?i)\b(that'?s wrong|that is wrong|you didn'?t|not like that|you forgot|"
+    r"you should have|next time|don'?t do that|do not do that|incorrect|"
+    r"when i ask you to|turn your head|orient (?:the )?head)\b"
+)
+_BODY_DUMP_RE = re.compile(
+    r"\[TEELA BODY NOW\]|\bRevision:\s*\d+.*\bHead:\s*yaw|\bpose=\w+.*\bwaving=",
+    re.I | re.S,
+)
+_FRAME_DUMP_RE = re.compile(r"(?i)\bframe\s+\d{4,}\b")
 _PATH_RE = re.compile(
     r"(?:(?:[A-Za-z]:)?(?:/|\\))?[\w./\\-]+\.[A-Za-z0-9]{1,8}"
 )
@@ -51,6 +67,77 @@ def estimate_tokens(text: str) -> int:
     return max(1, n // 4) if n else 0
 
 
+def query_tokens(text: str) -> set[str]:
+    return {t.lower() for t in _FTS_TOKEN_RE.findall(text or "") if len(t) >= 3}
+
+
+def looks_like_correction(text: str) -> bool:
+    return bool(_CORRECTION_RE.search(text or ""))
+
+
+def looks_like_body_dump(text: str) -> bool:
+    raw = text or ""
+    if _BODY_DUMP_RE.search(raw):
+        return True
+    low = raw.lower()
+    # Conversational claims about current pose are not live telemetry.
+    if "arm is raised" in low or "arm is currently" in low:
+        return True
+    if "head is currently" in low or "i am currently posing" in low:
+        return True
+    return False
+
+
+def looks_like_frame_dump(text: str) -> bool:
+    raw = text or ""
+    if _FRAME_DUMP_RE.search(raw):
+        return True
+    if raw.lower().count("frame ") >= 4 and len(raw) > 800:
+        return True
+    return False
+
+
+def score_memory_record(
+    rec: "MemoryRecord",
+    query: str,
+    *,
+    task_goal: str | None = None,
+) -> tuple[float, list[str]]:
+    """Intent-aware score in [0, 1] plus reason codes. Manager-emitted, not model prose."""
+    qtoks = query_tokens(query)
+    ftoks = query_tokens(rec.text) | {t.lower() for t in (rec.tags or [])}
+    overlap = 0.0
+    if qtoks:
+        overlap = len(qtoks & ftoks) / float(len(qtoks))
+    base = _bm25_score(rec.rank)
+    if base is None:
+        base = 0.0
+    score = (0.35 * base) + (0.65 * overlap)
+    codes: list[str] = []
+    if overlap > 0:
+        codes.append("SEMANTIC_MATCH")
+    tags_l = {t.lower() for t in (rec.tags or [])}
+    if "correction" in tags_l or "corrections" in tags_l or looks_like_correction(rec.text):
+        codes.append("USER_CORRECTION")
+        if overlap > 0:
+            score += 0.2
+    if "skill" in tags_l or "procedural" in tags_l:
+        codes.append("SKILL_MATCH")
+        if overlap > 0:
+            score += 0.12
+    if task_goal:
+        gtoks = query_tokens(task_goal)
+        if gtoks and (gtoks & ftoks):
+            codes.append("ACTIVE_TASK")
+            score += 0.1
+    if overlap >= 0.5:
+        codes.append("ENTITY_MATCH")
+    score = max(0.0, min(1.0, score))
+    if not codes and score >= 0.01:
+        codes.append("SEMANTIC_MATCH")
+    return score, codes
+
+
 def extract_tool_result(content: str) -> str:
     """Keep tool output out of working memory when it is a dump or image bytes."""
     raw = content or ""
@@ -66,6 +153,11 @@ def extract_tool_result(content: str) -> str:
         )
     if len(raw) > TOOL_RESULT_SOFT_MAX * 4:
         return raw[:TOOL_RESULT_SOFT_MAX].rstrip() + "\n...[truncated]"
+    if looks_like_frame_dump(raw):
+        return (
+            raw[:240].rstrip()
+            + "\n...[perception frames omitted; store semantic events only]"
+        )
     return raw
 
 
@@ -107,6 +199,7 @@ class MemoryRecord:
     media_path: str | None
     media_type: MediaType | None
     created_at: int
+    rank: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -126,6 +219,9 @@ class AssembledContext:
     summary_tokens: int = 0
     retrieval_tokens: int = 0
     tail_tokens: int = 0
+    items: list[dict[str, Any]] = field(default_factory=list)
+    retrieval: dict[str, Any] | None = None
+    retrieved_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -300,6 +396,55 @@ def _fts_match_query(query: str) -> str:
     return " OR ".join('"' + t.replace('"', "") + '"' for t in toks[:24])
 
 
+_TYPE_TAGS = {
+    "episodic": ("episodic", "episode", "experience", "event"),
+    "semantic": ("semantic", "knowledge", "fact"),
+    "procedural": ("procedural", "procedure", "skill", "how-to", "correction", "corrections"),
+    "relational": ("relational", "person", "relationship", "people"),
+    "self": ("self", "identity", "self-model"),
+    "task": ("task", "goal", "checkpoint", "horizon"),
+}
+
+
+def _classify_tags(tags: list[str] | None) -> str:
+    tset = {str(t).strip().lower() for t in (tags or []) if str(t).strip()}
+    if not tset:
+        return "unknown"
+    for kind, keys in _TYPE_TAGS.items():
+        if tset & set(keys):
+            return kind
+    return "unknown"
+
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _bm25_score(rank: float | None) -> float | None:
+    if rank is None:
+        return None
+    try:
+        x = float(rank)
+    except (TypeError, ValueError):
+        return None
+    try:
+        s = 1.0 / (1.0 + math.exp(x))
+    except OverflowError:
+        s = 0.0 if x > 0 else 1.0
+    return max(0.0, min(1.0, float(s)))
+
+
+def _memory_source(tags: list[str] | None) -> str:
+    kind = _classify_tags(tags)
+    return {
+        "episodic": "episodic_memory",
+        "semantic": "semantic_memory",
+        "procedural": "procedural_memory",
+        "self": "self_model",
+        "task": "active_task",
+    }.get(kind, "unknown")
+
+
 class SqliteStore:
     def __init__(self, db_path: Path, media_dir: Path) -> None:
         self.db_path = db_path
@@ -374,6 +519,12 @@ class SqliteStore:
             except ValueError:
                 media_type = None
             tags = [t for t in str(row["tags"] or "").split() if t]
+            rank = None
+            try:
+                if row["rank"] is not None:
+                    rank = float(row["rank"])
+            except (KeyError, TypeError, ValueError, IndexError):
+                rank = None
             out.append(
                 MemoryRecord(
                     id=int(row["id"]),
@@ -382,9 +533,121 @@ class SqliteStore:
                     media_path=row["media_path"],
                     media_type=media_type,
                     created_at=int(row["created_at"] or 0),
+                    rank=rank,
                 )
             )
         return out
+
+    def count(self) -> int:
+        conn = self._connect()
+        row = conn.execute("SELECT COUNT(*) FROM facts").fetchone()
+        return int(row[0] if row else 0)
+
+    def get(self, fact_id: int) -> MemoryRecord | None:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT id, text, tags, media_path, media_type, created_at FROM facts WHERE id=?",
+            (int(fact_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_record(row, rank=None)
+
+    def type_counts(self) -> dict[str, int]:
+        conn = self._connect()
+        rows = conn.execute("SELECT tags FROM facts").fetchall()
+        counts = {
+            "episodic": 0,
+            "semantic": 0,
+            "procedural": 0,
+            "relational": 0,
+            "self": 0,
+            "task": 0,
+            "unknown": 0,
+            "corrections": 0,
+            "total": 0,
+        }
+        for (tags,) in rows:
+            tag_list = [t for t in str(tags or "").split() if t]
+            kind = _classify_tags(tag_list)
+            counts[kind] = counts.get(kind, 0) + 1
+            counts["total"] += 1
+            if any(t.lower() == "correction" or t.lower() == "corrections" for t in tag_list):
+                counts["corrections"] += 1
+        return counts
+
+    def list_facts(
+        self,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+        query: str = "",
+        type_filter: str = "",
+        corrections: bool = False,
+    ) -> tuple[list[MemoryRecord], int]:
+        limit = max(1, min(int(limit or 50), 100))
+        offset = max(0, int(offset or 0))
+        conn = self._connect()
+        q = (query or "").strip()
+        kind = (type_filter or "").strip().lower()
+        if kind in {"all", "*"}:
+            kind = ""
+        if q:
+            match = _fts_match_query(q)
+            try:
+                rows = conn.execute(
+                    "SELECT f.id, f.text, f.tags, f.media_path, f.media_type, f.created_at, "
+                    "bm25(facts_fts) AS rank "
+                    "FROM facts_fts JOIN facts f ON f.id = facts_fts.rowid "
+                    "WHERE facts_fts MATCH ? "
+                    "ORDER BY rank ASC, f.created_at DESC",
+                    (match,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
+        else:
+            rows = conn.execute(
+                "SELECT id, text, tags, media_path, media_type, created_at FROM facts "
+                "ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        recs: list[MemoryRecord] = []
+        for row in rows:
+            rec = self._row_to_record(row, rank=row["rank"] if "rank" in row.keys() else None)
+            tags_l = {t.lower() for t in rec.tags}
+            if corrections and "correction" not in tags_l and "corrections" not in tags_l:
+                continue
+            if kind:
+                if kind in {"correction", "corrections"}:
+                    if "correction" not in tags_l and "corrections" not in tags_l:
+                        continue
+                elif _classify_tags(rec.tags) != kind:
+                    continue
+            recs.append(rec)
+        total = len(recs)
+        return recs[offset : offset + limit], total
+
+    def _row_to_record(self, row: sqlite3.Row, rank: Any = None) -> MemoryRecord:
+        mt = row["media_type"]
+        try:
+            media_type = MediaType(mt) if mt else None
+        except ValueError:
+            media_type = None
+        tags = [t for t in str(row["tags"] or "").split() if t]
+        rk = None
+        try:
+            if rank is not None:
+                rk = float(rank)
+        except (TypeError, ValueError):
+            rk = None
+        return MemoryRecord(
+            id=int(row["id"]),
+            text=str(row["text"]),
+            tags=tags,
+            media_path=row["media_path"],
+            media_type=media_type,
+            created_at=int(row["created_at"] or 0),
+            rank=rk,
+        )
 
     def _store_image(self, src: Path) -> str:
         src = Path(src)
@@ -617,6 +880,8 @@ class MemoryManager:
         if summarizer is None:
             summarizer = FallbackSummarizer(LocalModelSummarizer(), RuleBasedSummarizer())
         self.summarizer = summarizer
+        self.context_events: deque[dict[str, Any]] = deque(maxlen=200)
+        self.last_assembly: AssembledContext | None = None
 
     @classmethod
     def for_workspace(cls, workspace: Path, model_id: str = "qwen38-27b") -> MemoryManager:
@@ -648,10 +913,78 @@ class MemoryManager:
         overflow = self.working.overflow()
         if not overflow:
             return
+        before = int(self.working.total_tokens)
+        self._persist_durable_overflow(overflow)
         updated = self.summarizer.compact(overflow[:MAX_OVERFLOW_TURNS], self.summary)
         self.summary = updated
         self.summary.save(self.summary_path)
         self.working.drain_overflow()
+        after = int(self.working.total_tokens)
+        self.context_events.append(
+            {
+                "type": "CONTEXT_COMPACTED",
+                "ts": _iso_now(),
+                "before": before,
+                "after": after,
+                "preserved": ["recent conversation", "session summary", "durable corrections"],
+                "removed": ["older turns"],
+            }
+        )
+        self.context_events.append(
+            {
+                "type": "CONVERSATION_SUMMARIZED",
+                "ts": _iso_now(),
+                "overflow_turns": len(overflow),
+            }
+        )
+        self.context_events.append(
+            {
+                "type": "CONTEXT_ITEM_EVICTED",
+                "ts": _iso_now(),
+                "count": len(overflow),
+            }
+        )
+
+    def _persist_durable_overflow(self, overflow: list[Turn]) -> int:
+        """Store durable corrections/procedures before they leave working memory."""
+        wrote = 0
+        for t in overflow:
+            if t.role is not Role.USER:
+                continue
+            text = (t.content or "").strip()
+            if not text or looks_like_frame_dump(text) or looks_like_body_dump(text):
+                continue
+            if not looks_like_correction(text):
+                continue
+            try:
+                self.store.write(text[:800], ["correction", "procedural", "user-taught"])
+                wrote += 1
+            except ValueError:
+                continue
+        if wrote:
+            self.context_events.append(
+                {
+                    "type": "CORRECTION_LOADED",
+                    "ts": _iso_now(),
+                    "persisted": wrote,
+                    "note": "persisted before eviction",
+                }
+            )
+        return wrote
+
+    def force_compact(self) -> bool:
+        """Run compaction if any overflow exists, even below the usual threshold."""
+        with self._lock:
+            overflow = self.working.overflow()
+            if not overflow:
+                return False
+            prev = self.compact_threshold_tokens
+            self.compact_threshold_tokens = 0
+            try:
+                self._compact_if_needed()
+            finally:
+                self.compact_threshold_tokens = prev
+            return True
 
     def write(
         self,
@@ -677,38 +1010,105 @@ class MemoryManager:
         with self._lock:
             return self.store.retrieve(query, limit=limit)
 
-    def assemble_context(self, budget: TokenBudget, retrieval_query: str) -> AssembledContext:
+    def assemble_context(
+        self,
+        budget: TokenBudget,
+        retrieval_query: str,
+        *,
+        max_retrieve: int | None = None,
+        min_relevance: float | None = None,
+        max_tail_turns: int | None = None,
+        task_goal: str | None = None,
+        extra_blocks: list[tuple[str, dict[str, Any]]] | None = None,
+        exclude_body_observations: bool = True,
+    ) -> AssembledContext:
         cap = max(0, int(budget.available_for_memory))
+        max_n = DEFAULT_MAX_RETRIEVE if max_retrieve is None else max(0, int(max_retrieve))
+        min_rel = DEFAULT_MIN_RELEVANCE if min_relevance is None else float(min_relevance)
         with self._lock:
             summary_text = self.summary.render()
-            hits = self.store.retrieve(retrieval_query, limit=8) if retrieval_query.strip() else []
+            candidates = (
+                self.store.retrieve(retrieval_query, limit=24) if retrieval_query.strip() else []
+            )
             tail = self.working.tail_newest_first()
+            if max_tail_turns is not None:
+                tail = tail[: max(0, int(max_tail_turns))]
         parts: list[str] = []
         used = 0
         summary_tokens = 0
         retrieval_tokens = 0
         tail_tokens = 0
+        items: list[dict[str, Any]] = []
+        loaded_at = _iso_now()
         if summary_text:
             n = estimate_tokens(summary_text)
             if used + n <= cap:
                 parts.append(summary_text)
                 used += n
                 summary_tokens = n
+                dash_n, est = tel.count_tokens_local(summary_text), True
+                items.append(
+                    {
+                        "id": "session_summary",
+                        "section": "active_task" if self.summary.goal else "conversation",
+                        "type": "task" if self.summary.goal else "conversation",
+                        "title": self.summary.goal or "Session memory",
+                        "token_count": dash_n,
+                        "estimated": est,
+                        "source": "conversation_summary",
+                        "reason_codes": ["ACTIVE_TASK", "TASK_CHECKPOINT"]
+                        if self.summary.goal
+                        else ["RECENT_CONVERSATION"],
+                        "pinned": bool(self.summary.goal),
+                        "loaded_at": loaded_at,
+                        "store": "session_summary.json",
+                    }
+                )
         retrieval_cap = max(0, int(cap * TIER3_BUDGET_FRACTION))
         fact_lines: list[str] = []
         fact_used = 0
-        for rec in hits:
+        selected_recs: list[MemoryRecord] = []
+        selected_meta: dict[int, tuple[float, list[str]]] = {}
+        rejected_recs: list[tuple[MemoryRecord, str]] = []
+        ranked: list[tuple[float, MemoryRecord, list[str]]] = []
+        seen_text: set[str] = set()
+        for rec in candidates:
+            if exclude_body_observations and looks_like_body_dump(rec.text):
+                rejected_recs.append((rec, "stale_body_observation"))
+                continue
+            if looks_like_frame_dump(rec.text):
+                rejected_recs.append((rec, "perception_flood"))
+                continue
+            key = re.sub(r"\s+", " ", (rec.text or "").strip().lower())[:240]
+            if key in seen_text:
+                rejected_recs.append((rec, "duplicate"))
+                continue
+            seen_text.add(key)
+            sc, codes = score_memory_record(rec, retrieval_query, task_goal=task_goal)
+            if sc < min_rel and "USER_CORRECTION" not in codes:
+                rejected_recs.append((rec, "below_relevance_threshold"))
+                continue
+            ranked.append((sc, rec, codes))
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        for sc, rec, codes in ranked:
+            if len(selected_recs) >= max_n:
+                rejected_recs.append((rec, "over_retrieve_cap"))
+                continue
             line = rec.text
             if rec.media_path:
                 line += f" [path: {rec.media_path}]"
             n = estimate_tokens(line)
             if fact_used + n > retrieval_cap:
-                break
+                rejected_recs.append((rec, "over_retrieval_budget"))
+                continue
             if used + n > cap:
-                break
+                rejected_recs.append((rec, "over_memory_budget"))
+                continue
             fact_lines.append("- " + line)
             fact_used += n
             used += n
+            selected_recs.append(rec)
+            selected_meta[rec.id] = (sc, codes)
         if fact_lines:
             block = "# Recalled facts\n" + "\n".join(fact_lines)
             extra = estimate_tokens("# Recalled facts\n") 
@@ -719,6 +1119,37 @@ class MemoryManager:
             else:
                 used -= fact_used
                 retrieval_tokens = 0
+                rejected_recs.extend((rec, "block_did_not_fit") for rec in selected_recs)
+                selected_recs = []
+        for rec in selected_recs:
+            line = rec.text
+            if rec.media_path:
+                line += f" [path: {rec.media_path}]"
+            dash_n = tel.count_tokens_local(line)
+            score, codes = selected_meta.get(rec.id, (_bm25_score(rec.rank), ["SEMANTIC_MATCH"]))
+            items.append(
+                {
+                    "id": f"mem_{rec.id}",
+                    "section": "retrieved_memory",
+                    "type": _classify_tags(rec.tags),
+                    "title": (rec.text or "").strip().split("\n", 1)[0][:80],
+                    "token_count": dash_n,
+                    "estimated": True,
+                    "source": _memory_source(rec.tags),
+                    "store": "facts.sqlite",
+                    "record": f"mem_{rec.id}",
+                    "reason_codes": codes,
+                    "relevance_score": score,
+                    "confidence": score,
+                    "pinned": False,
+                    "loaded_at": loaded_at,
+                    "last_used": loaded_at,
+                    "tags": list(rec.tags),
+                    "priority": "high" if score is not None and score >= 0.9 else (
+                        "medium" if score is not None and score >= 0.7 else ("low" if score is not None else "unknown")
+                    ),
+                }
+            )
         tail_lines: list[str] = []
         for t in tail:
             line = f"{t.role.value}: {t.content}"
@@ -730,29 +1161,149 @@ class MemoryManager:
             tail_tokens += n
         if tail_lines:
             parts.append("# Recent turns\n" + "\n".join(tail_lines))
+            dash_n = tel.count_tokens_local("# Recent turns\n" + "\n".join(tail_lines))
+            items.append(
+                {
+                    "id": "recent_turns",
+                    "section": "conversation",
+                    "type": "conversation",
+                    "title": "Recent conversation",
+                    "token_count": dash_n,
+                    "estimated": True,
+                    "source": "conversation",
+                    "reason_codes": ["RECENT_CONVERSATION"],
+                    "pinned": False,
+                    "loaded_at": loaded_at,
+                }
+            )
+        for block, meta in extra_blocks or []:
+            text_b = (block or "").strip()
+            if not text_b:
+                continue
+            n = estimate_tokens(text_b)
+            if used + n > cap:
+                continue
+            parts.append(text_b)
+            used += n
+            dash_n = tel.count_tokens_local(text_b)
+            item = {
+                "id": str(meta.get("id") or "workspace_block"),
+                "section": str(meta.get("section") or "workspace"),
+                "type": str(meta.get("type") or "task"),
+                "title": str(meta.get("title") or "Task workspace"),
+                "token_count": dash_n,
+                "estimated": True,
+                "source": str(meta.get("source") or "active_task"),
+                "reason_codes": list(meta.get("reason_codes") or ["ACTIVE_TASK", "TASK_CHECKPOINT"]),
+                "pinned": bool(meta.get("pinned", True)),
+                "loaded_at": loaded_at,
+            }
+            items.append(item)
         text = "\n\n".join(p for p in parts if p).strip()
         total = estimate_tokens(text) if text else 0
         if total > cap:
             text = text[: max(0, cap * 4)]
             total = estimate_tokens(text)
-        return AssembledContext(
+        injected_dash = 0
+        for rec in selected_recs:
+            injected_dash += tel.count_tokens_local(rec.text or "")
+        retrieval = {
+            "query": retrieval_query,
+            "query_intent": retrieval_query,
+            "candidates_examined": len(candidates),
+            "selected": [
+                {
+                    "id": f"mem_{rec.id}",
+                    "title": (rec.text or "").strip().split("\n", 1)[0][:80],
+                    "score": selected_meta.get(rec.id, (_bm25_score(rec.rank), []))[0],
+                    "reason_codes": selected_meta.get(rec.id, (None, ["SEMANTIC_MATCH"]))[1],
+                }
+                for rec in selected_recs
+            ],
+            "rejected": [
+                {
+                    "id": f"mem_{rec.id}",
+                    "title": (rec.text or "").strip().split("\n", 1)[0][:80],
+                    "score": _bm25_score(rec.rank),
+                    "reason": why,
+                }
+                for rec, why in rejected_recs[:8]
+            ],
+            "injected_tokens": injected_dash,
+            "injected_tokens_estimated": True,
+            "timestamp": loaded_at,
+        }
+        assembled = AssembledContext(
             text=text,
             token_count=total,
             summary_tokens=summary_tokens,
             retrieval_tokens=retrieval_tokens,
             tail_tokens=tail_tokens,
+            items=items,
+            retrieval=retrieval,
+            retrieved_ids=[f"mem_{rec.id}" for rec in selected_recs],
         )
+        self.last_assembly = assembled
+        if selected_recs:
+            self.context_events.append(
+                {
+                    "type": "MEMORY_RETRIEVED",
+                    "ts": loaded_at,
+                    "query_intent": retrieval_query,
+                    "selected": len(selected_recs),
+                    "candidates_examined": len(candidates),
+                    "injected_tokens": injected_dash,
+                }
+            )
+            self.context_events.append(
+                {
+                    "type": "CONTEXT_ITEM_LOADED",
+                    "ts": loaded_at,
+                    "count": len(selected_recs),
+                    "ids": [f"mem_{rec.id}" for rec in selected_recs],
+                }
+            )
+            if any("USER_CORRECTION" in selected_meta.get(rec.id, (0, []))[1] for rec in selected_recs):
+                self.context_events.append(
+                    {
+                        "type": "CORRECTION_LOADED",
+                        "ts": loaded_at,
+                        "ids": [
+                            f"mem_{rec.id}"
+                            for rec in selected_recs
+                            if "USER_CORRECTION" in selected_meta.get(rec.id, (0, []))[1]
+                        ],
+                    }
+                )
+            if any("SKILL_MATCH" in selected_meta.get(rec.id, (0, []))[1] for rec in selected_recs):
+                self.context_events.append(
+                    {
+                        "type": "SKILL_LOADED",
+                        "ts": loaded_at,
+                        "ids": [
+                            f"mem_{rec.id}"
+                            for rec in selected_recs
+                            if "SKILL_MATCH" in selected_meta.get(rec.id, (0, []))[1]
+                        ],
+                    }
+                )
+        return assembled
 
     def observe_and_assemble(
         self,
         messages: list[Any],
         retrieval_query: str,
         budget: TokenBudget | None = None,
+        **assemble_kw: Any,
     ) -> AssembledContext:
         self.ingest_chat_messages(messages)
         if not retrieval_query.strip():
             retrieval_query = _last_user_text(messages)
-        return self.assemble_context(budget or TokenBudget.for_model(self.model_id), retrieval_query)
+        return self.assemble_context(
+            budget or TokenBudget.for_model(self.model_id),
+            retrieval_query,
+            **assemble_kw,
+        )
 
 
 def _last_user_text(messages: list[Any]) -> str:

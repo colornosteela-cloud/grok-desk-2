@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Ubuntu:wght@300;400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/grokbot.css?v=83" />
+  <link rel="stylesheet" href="/grokbot.css?v=84" />
   <link rel="stylesheet" href="/styles.css?v=71" />
   <link rel="stylesheet" href="/vendor/xterm.css" />
 </head>
@@ -85,6 +85,10 @@
             </div>
           </div>
           <input id="import-file" type="file" accept=".json,.jsonl,.md,.txt,.zip,application/json,application/zip,text/markdown,text/plain" hidden />
+          <button id="wm-indicator" class="wm-indicator" type="button" title="Working Memory" hidden>
+            <span class="wm-indicator-icon" aria-hidden="true">🧠</span>
+            <span id="wm-indicator-text">—</span>
+          </button>
           <button id="theme-toggle" class="icon-btn" type="button" title="Switch theme">◐</button>
           <button id="screen-open" class="icon-btn" type="button" title="Show workspace">‹</button>
         </div>
@@ -147,7 +151,7 @@
             </div>
           </div>
           <div class="runtime-stats">
-            <div class="context-stat" title="Live conversation context">
+            <div class="context-stat" id="context-stat" title="Live conversation context — open Working Memory" role="button" tabindex="0">
               <span class="stat-label">Context</span>
               <strong id="context-usage">0 / 0</strong>
               <div class="context-meter"><span id="context-meter-fill"></span></div>
@@ -1149,9 +1153,45 @@
     </form>
   </dialog>
 
+  <div id="wm-drawer" class="wm-drawer" hidden>
+    <div id="wm-scrim" class="wm-scrim"></div>
+    <aside id="wm-panel" class="wm-panel" role="dialog" aria-modal="true" aria-labelledby="wm-title">
+      <header class="wm-head">
+        <div>
+          <div class="wm-kicker">TEELA — WORKING MEMORY</div>
+          <h2 id="wm-title">Working Memory</h2>
+          <p id="wm-head-meta" class="wm-head-meta">Context accounting: Unavailable</p>
+        </div>
+        <button id="wm-close" class="icon-btn" type="button" title="Close working memory">×</button>
+      </header>
+      <div class="wm-toolbar">
+        <label class="wm-search">
+          <span>Search</span>
+          <input id="wm-search" type="search" placeholder="gaze, correction, skill…" autocomplete="off" />
+        </label>
+        <div class="wm-toolbar-actions">
+          <button id="wm-refresh" class="small-action" type="button">Refresh</button>
+          <button id="wm-copy" class="small-action" type="button">Copy Debug Snapshot</button>
+          <button id="wm-export" class="small-action" type="button">Export Context Manifest</button>
+        </div>
+      </div>
+      <nav class="wm-tabs" aria-label="Working memory views">
+        <button type="button" class="wm-tab is-active" data-wm-tab="overview">Overview</button>
+        <button type="button" class="wm-tab" data-wm-tab="active">Active Context</button>
+        <button type="button" class="wm-tab" data-wm-tab="inspect">Inspect Context Items</button>
+        <button type="button" class="wm-tab" data-wm-tab="memory">Long-Term Memory</button>
+        <button type="button" class="wm-tab" data-wm-tab="retrieval">Retrieval</button>
+        <button type="button" class="wm-tab" data-wm-tab="history">Context History</button>
+        <button type="button" class="wm-tab" data-wm-tab="runtime">Runtime</button>
+      </nav>
+      <div id="wm-body" class="wm-body"></div>
+    </aside>
+  </div>
+
   <script src="/vendor/xterm.js"></script>
   <script src="/vendor/xterm-addon-fit.js"></script>
-  <script src="/grokbot-ui.js?v=61"></script>
-  <script src="/app.js?v=190"></script>
+  <script src="/grokbot-ui.js?v=62"></script>
+  <script src="/app.js?v=192"></script>
+  <script src="/working-memory.js?v=1"></script>
 </body>
 </html>

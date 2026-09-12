@@ -2141,8 +2141,7 @@
       const node = bot.node ? ` · ${bot.node}` : "";
       btn.title = `${bot.name} · ${kindLabel}${node}`;
       btn.dataset.agentId = bot.id;
-      const showNode = !!(bot.node && (bot.remote || stub || (window.deskState?.peers || []).length));
-      btn.innerHTML = avatarHTML(bot) + (bot.unread ? '<span class="rail-unread"></span>' : "") + (showNode ? `<span class="rail-node${offline ? " offline" : ""}">${escapeHtml(bot.node)}</span>` : "");
+      btn.innerHTML = avatarHTML(bot) + (bot.unread ? '<span class="rail-unread"></span>' : "");
       if (!stub) {
         btn.addEventListener("click", () => {
           onSelect(bot.id);
@@ -2167,24 +2166,18 @@
     featured.innerHTML = all
       .slice(0, 3)
       .map((a) => {
-        const node = a.node && (a.remote || a.peer_stub || (window.deskState?.peers || []).length)
-          ? `<span class="node-chip${a.remote || a.peer_stub ? " remote" : " local"}${a.node_status && a.node_status !== "ok" ? " offline" : ""}">${escapeHtml(a.node)}${a.node_status && a.node_status !== "ok" ? " (offline)" : ""}</span>`
-          : "";
         return `<div class="featured-card${a.peer_stub ? " peer-stub" : ""}" data-agent="${a.id}" data-agent-id="${a.id}" data-peer-stub="${a.peer_stub ? "1" : ""}">
         ${avatarHTML(a)}
-        <div class="agent-name">${escapeHtml(a.name)}${a.peer_stub ? "" : node}</div>
+        <div class="agent-name">${escapeHtml(a.name)}</div>
       </div>`;
       })
       .join("");
     list.innerHTML = all
       .slice(3)
       .map((a) => {
-        const node = a.node && !a.peer_stub && (a.remote || (window.deskState?.peers || []).length)
-          ? `<span class="node-chip${a.remote ? " remote" : " local"}${a.node_status && a.node_status !== "ok" ? " offline" : ""}">${escapeHtml(a.node)}${a.node_status && a.node_status !== "ok" ? " (offline)" : ""}</span>`
-          : "";
         return `<div class="mobile-row${a.peer_stub ? " peer-stub" : ""}" data-agent="${a.id}" data-agent-id="${a.id}" data-peer-stub="${a.peer_stub ? "1" : ""}">
         ${avatarHTML(a)}
-        <div class="agent-main"><div class="agent-name">${escapeHtml(a.name)}${node}</div><div class="agent-preview">${escapeHtml(a.status || "Ready")}</div></div>
+        <div class="agent-main"><div class="agent-name">${escapeHtml(a.name)}</div><div class="agent-preview">${escapeHtml(a.status || "Ready")}</div></div>
       </div>`;
       })
       .join("");

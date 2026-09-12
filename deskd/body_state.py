@@ -107,6 +107,7 @@ class BodyStateStore:
         self._source = "simulation"
         self._revision = 0
         self._ts = time.time()
+        self._confirmation = "last_known"
         self._load()
 
     def close(self) -> None:
@@ -133,6 +134,8 @@ class BodyStateStore:
         self._revision = int(rev or 0)
         self._ts = float(ts or time.time())
         self._ingest_payload(payload)
+        # Disk restore is last-known until live telemetry/command confirms.
+        self._confirmation = "last_known"
 
     def _ingest_payload(self, payload: dict[str, Any]) -> None:
         joints = payload.get("joints") if isinstance(payload.get("joints"), dict) else {}
@@ -192,6 +195,8 @@ class BodyStateStore:
             "ts": float(self._ts),
             "source": self._source,
             "mode": self.mode,
+            "confirmation": self._confirmation,
+            "confirmation_status": self._confirmation,
             "freshness_ms": age_ms,
             "pose": self._pose,
             "motion": self._motion,
@@ -228,6 +233,7 @@ class BodyStateStore:
             if last_action is not None:
                 self._last_action = str(last_action) or None
             self._source = "command"
+            self._confirmation = "current_confirmed"
             self._bump_persist(meaningful=True)
             return self._snapshot_unlocked()
 
@@ -261,6 +267,7 @@ class BodyStateStore:
                 self._waving = bool(waving)
                 changed = True
             self._source = str(source or self._source)
+            self._confirmation = "current_confirmed"
             self._bump_persist(meaningful=changed)
             out = self._snapshot_unlocked()
             out["accepted"] = True
@@ -346,10 +353,13 @@ def compact_block(snap: dict[str, Any] | None) -> str:
             )
         disc_line = "; ".join(bits)
     age = st.get("freshness_ms")
+    confirmation = st.get("confirmation") or st.get("confirmation_status") or "last_known"
     return (
         "[TEELA BODY NOW]\n"
         f"Mode: {st.get('mode') or 'simulated'}\n"
         f"Revision: {st.get('revision') or 0}\n"
+        f"Confirmation: {confirmation}\n"
+        f"Authority: MiniOS/body-state (overrides conversation)\n"
         f"State age: {age if age is not None else '?'} ms\n"
         f"Motion: {st.get('motion') or 'idle'} pose={st.get('pose') or 'home'} waving={bool(st.get('waving'))}\n"
         f"Head: yaw {pan:.0f}°\n"
