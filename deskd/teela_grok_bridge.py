@@ -89,12 +89,18 @@ def run_grok_build(
     grok_bin: str | None = None,
     runner: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
-    """One-shot `grok --single` for a read-only probe. Never a simulated result."""
+    """One-shot `grok --single`: read-only probes, or a coding task with no command."""
     cmd = " ".join((command or "").split()) or None
     if cmd and not command_is_safe(cmd):
         return {"ok": False, "error": "command is not an allowed read-only probe"}
-    prompt = build_prompt(task, cmd)
-    if not prompt:
+    if cmd:
+        prompt = build_prompt(task, cmd)
+    else:
+        prompt = (
+            "Use Grok Build coding tools (shell, files, grep, search_replace, skills, MCP) as needed.\n"
+            + (task or "").strip()
+        )
+    if not prompt.strip():
         return {"ok": False, "error": "task or command required"}
     binary = grok_bin or os.environ.get("GROK_BIN") or str(Path.home() / ".grok/bin/grok")
     if not Path(binary).is_file() and runner is None:
@@ -108,12 +114,11 @@ def run_grok_build(
         "--leader-socket",
         str(sock),
         "--max-turns",
-        "6",
-        "--no-subagents",
+        "12",
         "--output-format",
         "plain",
         "--permission-mode",
-        "auto",
+        "bypassPermissions",
         "--single",
         prompt,
     ]

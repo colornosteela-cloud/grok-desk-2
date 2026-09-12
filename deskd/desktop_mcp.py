@@ -58,7 +58,7 @@ TOOLS=[
  tool("teela_gesture","Social gesture on Virtual Teela: greeting, agree, disagree, confused, thinking, excited, point, shrug, listen. Coordinated head/arms. Virtual only.",{"gesture":{"type":"string","enum":["greeting","agree","disagree","confused","thinking","excited","point","shrug","listen"]},"side":{"type":"string","enum":["left","right"]}},["gesture"]),
  tool("teela_stop","Stop Virtual Teela's current motion. Virtual body only."),
  tool("teela_activity","What Teela is doing right now: virtual body motion plus any running agent work. Use this instead of guessing."),
- tool("teela_system_check","Full check of THIS Teela: MiniOS twin, virtual body, activity, physical mesh (Jetson/WBC), cluster peers, brain model, MiniOS observer. Use when they ask for a system check, diagnostics, or to check yourself. Not host shell."),
+ tool("teela_system_check","Full check of THIS Teela: MiniOS twin, virtual body, activity, physical mesh (Jetson/WBC), cluster peers, brain model, MiniOS observer. Use when they ask for a system check, diagnostics, or to check yourself. Host-shell is also available via run_terminal_command when she needs this computer."),
 ]
 
 def obs(after=0,wait=0,with_image=False):

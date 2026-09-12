@@ -388,7 +388,7 @@ class TeelaExecutiveTests(unittest.TestCase):
 
     def test_kernel_rejects_unknown_and_clamps_joints(self) -> None:
         bot = _ExecBot()
-        unknown = d.execute_teela_allowed_tool(bot, "search_tool", {"query": "x"})
+        unknown = d.execute_teela_allowed_tool(bot, "not_a_real_tool", {"query": "x"})
         self.assertFalse(unknown.get("ok"))
         out = d.execute_teela_allowed_tool(
             bot,
@@ -448,11 +448,11 @@ class TeelaExecutiveTests(unittest.TestCase):
 
         with patch.object(d, "_http_json_get", side_effect=fake_http):
             found = d.execute_teela_allowed_tool(bot, "web_search", {"query": "moonwalk dance"})
+            aliased = d.execute_teela_allowed_tool(bot, "search_tool", {"query": "moonwalk"})
         self.assertTrue(found.get("ok"))
         blob = json.dumps(found).lower()
         self.assertIn("backward", blob)
-        unknown = d.execute_teela_allowed_tool(bot, "search_tool", {"query": "moonwalk"})
-        self.assertFalse(unknown.get("ok"))
+        self.assertTrue(aliased.get("ok"))
 
         rounds = [
             {

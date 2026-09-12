@@ -58,6 +58,11 @@ class BotKindTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 d.ensure_single_teela_brain("teela-brain")
 
+    def test_load_existing_skips_extra_teela_brain(self) -> None:
+        src = Path(d.__file__).read_text(encoding="utf-8")
+        self.assertIn("skipping extra Teela Brain", src)
+        self.assertIn("occupies_teela_brain_slot(bot) and teela_brain_slot_taken()", src)
+
     def test_normalize_aliases(self) -> None:
         self.assertEqual(d.normalize_bot_kind("Grok Build"), "grok-build")
         self.assertEqual(d.normalize_bot_kind("agentic"), "grok-build")
@@ -180,10 +185,11 @@ class BotKindTests(unittest.TestCase):
         teela = types.SimpleNamespace(**{**grok.__dict__, "kind": "teela-brain"})
         tfields = d.Bot.profile_fields(teela)  # type: ignore[arg-type]
         self.assertEqual(tfields["kind"], "teela-brain")
-        self.assertFalse(tfields["inherit_user_skills"])
-        self.assertFalse(tfields["inherit_user_mcp"])
+        self.assertTrue(tfields["inherit_user_skills"])
+        self.assertTrue(tfields["inherit_user_mcp"])
         self.assertTrue(tfields["browser"])
-        self.assertEqual(tfields["host_access"], "never")
+        self.assertEqual(tfields["host_access"], "full")
+        self.assertEqual(tfields["permission_mode"], "always-approve")
 
     def test_grok_build_agents_md_skips_runtime_dump(self) -> None:
         body = d.agents_markdown_for_bot(_KindBot("grok-build"))
@@ -845,7 +851,11 @@ class BotKindTests(unittest.TestCase):
         self.assertIn("read_file", names)
         self.assertIn("list_dir", names)
         self.assertIn("web_search", names)
-        self.assertNotIn("search_tool", names)
+        self.assertIn("search_tool", names)
+        self.assertIn("run_terminal_command", names)
+        self.assertIn("grep", names)
+        self.assertIn("search_replace", names)
+        self.assertIn("grok_build", names)
         loop = Path(d.__file__).read_text(encoding="utf-8").split("def _run_prompt_loop", 1)[1].split("def ", 1)[0]
         self.assertIn("run_teela_executive_turn", loop)
         self.assertNotIn("teela_turn_lane", loop)
@@ -873,8 +883,9 @@ class BotKindTests(unittest.TestCase):
         self.assertTrue(out.get("ok"))
         self.assertEqual(bot.applied[0].get("cmd"), "pose")
         self.assertEqual(bot.applied[0].get("pose"), "wave")
-        unknown = d.dispatch_teela_minios_tool(bot, "search_tool", {"query": "x"})
-        self.assertFalse(unknown.get("ok"))
+        with patch.object(d, "_teela_web_search_tool", return_value={"ok": True, "query": "x", "results": []}):
+            searched = d.dispatch_teela_minios_tool(bot, "search_tool", {"query": "x"})
+        self.assertTrue(searched.get("ok"))
         rounds = [
             {
                 "choices": [
@@ -907,6 +918,35 @@ class BotKindTests(unittest.TestCase):
             bot.applied
             or "wav" in (line or "").lower()
         )
+
+    def test_teela_host_coding_tools_run_for_herself(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "note.txt").write_text("hello teela\nsecond line\n", encoding="utf-8")
+
+        class _Bot:
+            id = "b_teela"
+            kind = "teela-brain"
+            workspace = root
+
+        bot = _Bot()
+        shell = d.dispatch_teela_minios_tool(bot, "run_terminal_command", {"command": "uname -s"})
+        self.assertTrue(shell.get("ok"))
+        self.assertIn("Linux", str(shell.get("output") or ""))
+        self.assertEqual(shell.get("via"), "host-shell")
+        grepped = d.dispatch_teela_minios_tool(bot, "grep", {"pattern": "hello", "path": "."})
+        self.assertTrue(grepped.get("ok"))
+        self.assertTrue(any("hello teela" in str(m.get("text")) for m in grepped.get("matches") or []))
+        replaced = d.dispatch_teela_minios_tool(
+            bot,
+            "search_replace",
+            {"path": "note.txt", "old_string": "hello teela", "new_string": "hi teela"},
+        )
+        self.assertTrue(replaced.get("ok"))
+        self.assertEqual((root / "note.txt").read_text(encoding="utf-8").splitlines()[0], "hi teela")
+        self.assertTrue(d.bot_kind_has_host_coding(_KindBot("teela-brain")))
+        self.assertTrue(d.bot_kind_has_host_coding(_KindBot("grok-build")))
 
     def test_teela_minios_loop_writes_and_injects_memory(self) -> None:
         import memory as botmem

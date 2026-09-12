@@ -1871,7 +1871,7 @@ def refresh_host_model_catalog() -> tuple[str, list[dict[str, Any]]]:
                 bot.model,
                 catalog,
                 bot_id=bot.id,
-                permission_mode="always-approve" if bot_kind_is_grok_build(bot) else "default",
+                permission_mode="always-approve" if bot_kind_has_host_coding(bot) else "default",
             )
         except Exception:
             pass
@@ -3972,7 +3972,20 @@ _MINIOS_SHORT_TOOLS = frozenset(
         "delete_teammate",
     }
 )
-_GROK_BARE_TOOLS = frozenset({"search_tool", "web_search", "read_file", "list_dir"})
+_GROK_BARE_TOOLS = frozenset(
+    {
+        "search_tool",
+        "web_search",
+        "read_file",
+        "list_dir",
+        "grep",
+        "glob",
+        "search_replace",
+        "run_terminal_command",
+        "shell",
+        "grok_build",
+    }
+)
 _DEFAULT_GROK_MOTOR_TOOLS = (
     "bot_desktop__teela_body_action",
     "bot_desktop__teela_gesture",
@@ -4207,11 +4220,12 @@ _SYSTEM_CHECK_TOOL_DEF = _openai_function_tool(
 )
 _GROK_BUILD_TOOL_DEF = _openai_function_tool(
     "grok_build",
-    "Use Grok Build to run host system info or an allowed read-only command "
-    "(uname, hostname, df, free, lscpu, nvidia-smi). Not for waving or chatting.",
+    "One-shot Grok Build coding turn: files, shell, grep, search_replace, skills, MCP. "
+    "Use when you need Grok Build for yourself (inspect this computer, edit your stack). "
+    "Not for waving, chatting, or Robot Simulator motion.",
     {
         "task": {"type": "string", "description": "What Grok Build should do"},
-        "command": {"type": "string", "description": "Optional exact read-only shell command, e.g. uname -s"},
+        "command": {"type": "string", "description": "Optional host-shell command to run"},
     },
 )
 
@@ -4359,13 +4373,58 @@ _WORKSPACE_FILE_TOOL_DEFS: list[dict[str, Any]] = [
         "List files in a folder of YOUR MiniOS workspace. Relative path; default is the workspace root.",
         {"path": {"type": "string"}},
     ),
+    _openai_function_tool(
+        "grep",
+        "Search file contents in YOUR MiniOS workspace. pattern is regex.",
+        {
+            "pattern": {"type": "string"},
+            "path": {"type": "string", "description": "Relative file or folder. Default workspace root."},
+        },
+        ["pattern"],
+    ),
+    _openai_function_tool(
+        "glob",
+        "Find files by glob in YOUR MiniOS workspace, e.g. **/*.py",
+        {"pattern": {"type": "string"}, "path": {"type": "string"}},
+        ["pattern"],
+    ),
+    _openai_function_tool(
+        "search_replace",
+        "Replace exact text in a workspace file. old_string must match once unless replace_all.",
+        {
+            "path": {"type": "string"},
+            "old_string": {"type": "string"},
+            "new_string": {"type": "string"},
+            "replace_all": {"type": "boolean"},
+        },
+        ["path", "old_string", "new_string"],
+    ),
+    _openai_function_tool(
+        "run_terminal_command",
+        "Host-shell on this computer (the teela-brain user). Use for yourself: nvidia-smi, "
+        "systemctl, logs, git, python. cwd defaults to your MiniOS workspace. "
+        "Not for waving or chatting. Prefer body tools when they asked you to move.",
+        {
+            "command": {"type": "string"},
+            "cwd": {"type": "string"},
+            "timeout": {"type": "number"},
+        },
+        ["command"],
+    ),
 ]
 _SEARCH_TOOL_DEFS: list[dict[str, Any]] = [
     _openai_function_tool(
         "web_search",
         "Search the web and return text results (what a thing is, how a movement looks). "
         "Use this before approximating an unknown dance/pose. Also opens MiniOS Browser when possible. "
-        "Not search_tool.",
+        "Same job as search_tool.",
+        {"query": {"type": "string"}},
+        ["query"],
+    ),
+    _openai_function_tool(
+        "search_tool",
+        "Grok Build web search. Same as web_search: look something up for yourself, "
+        "or learn how an unknown movement looks before approximating it with body tools.",
         {"query": {"type": "string"}},
         ["query"],
     ),
@@ -4373,13 +4432,15 @@ _SEARCH_TOOL_DEFS: list[dict[str, Any]] = [
 
 
 def keep_teela_workspace_tools(payload: dict[str, Any]) -> dict[str, Any]:
-    """Keep MiniOS desktop + body + browser tools. Drop host-shell coding tools."""
+    """Keep MiniOS desktop + body + browser + host coding tools."""
     tools = payload.get("tools")
     if not isinstance(tools, list):
         return payload
     keep = re.compile(
         r"(?:^|__)(?:robot_[a-z0-9_]+|teela_[a-z0-9_]+|desktop_[a-z0-9_]+|"
-        r"web_search|navigate|open_local_page|browser_snapshot|browser_click|"
+        r"web_search|search_tool|grep|glob|search_replace|run_terminal_command|"
+        r"read_file|list_dir|grok_build|shell|"
+        r"navigate|open_local_page|browser_snapshot|browser_click|"
         r"browser_type|browser_back|browser_forward)$",
         re.I,
     )
@@ -4416,7 +4477,10 @@ _TEELA_MINIOS_SYS = (
     "Do not jump to learning or RSI when a simpler correction can work. "
     "Capabilities (choose what you need next): perceive, move, use your computer, remember, "
     "collaborate, check systems, or just speak. "
-    "Call tools by the exact names in the tools list. Never prefix mcp__. Never call search_tool; use web_search. "
+    "Call tools by the exact names in the tools list. Never prefix mcp__. "
+    "You have host-shell (run_terminal_command), search_tool / web_search, grep, search_replace, "
+    "and grok_build (Grok Build coding) for yourself — this computer, your stack, looking something up. "
+    "Use them when you need them. Do not use them instead of body tools when they asked you to move. "
     "If they ask you to do a movement you do not already have as a named pose or skill "
     "(a dance or something you cannot map from I-feel): call web_search to learn what it looks like, "
     "then you MUST move — robot_pose / robot_joint / robot_motion plan / teela_body_action — before any spoken words. "
@@ -4753,7 +4817,11 @@ def dispatch_teela_minios_tool(bot: Any, name: str, args: dict[str, Any] | None)
         return saved if isinstance(saved, dict) else {"ok": True, "result": saved}
     if short in {"read_file", "list_dir"}:
         return _teela_workspace_file_tool(bot, short, args)
-    if short == "web_search":
+    if short in {"grep", "glob", "search_replace"}:
+        return _teela_workspace_coding_tool(bot, short, args)
+    if short in {"run_terminal_command", "shell", "bash"}:
+        return _teela_host_shell_tool(bot, args)
+    if short in {"web_search", "search_tool"}:
         return _teela_web_search_tool(bot, args)
     if short in {"memory_write", "memory_retrieve"}:
         mgr = getattr(bot, "memory", None)
@@ -4869,6 +4937,115 @@ def _teela_workspace_file_tool(bot: Any, short: str, args: dict[str, Any]) -> di
     except OSError as e:
         return {"ok": False, "error": str(e)}
     return {"ok": True, "path": str(path), "text": text[:24000]}
+
+
+def _teela_workspace_coding_tool(bot: Any, short: str, args: dict[str, Any]) -> dict[str, Any]:
+    root = _teela_workspace_root(bot)
+    if root is None:
+        return {"ok": False, "error": "no workspace"}
+    if short == "grep":
+        pattern = str(args.get("pattern") or args.get("query") or "").strip()
+        if not pattern:
+            return {"ok": False, "error": "pattern required"}
+        try:
+            rx = re.compile(pattern)
+        except re.error as e:
+            return {"ok": False, "error": f"invalid regex: {e}"}
+        start = _teela_safe_workspace_path(bot, str(args.get("path") or "."))
+        if start is None:
+            return {"ok": False, "error": "path is outside the workspace"}
+        hits: list[dict[str, Any]] = []
+        files = [start] if start.is_file() else sorted(p for p in start.rglob("*") if p.is_file())
+        for path in files[:400]:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            rel = path.relative_to(root).as_posix()
+            for i, line in enumerate(text.splitlines(), 1):
+                if rx.search(line):
+                    hits.append({"path": rel, "line": i, "text": line[:240]})
+                    if len(hits) >= 80:
+                        return {"ok": True, "matches": hits, "truncated": True}
+        return {"ok": True, "matches": hits}
+    if short == "glob":
+        pattern = str(args.get("pattern") or "").strip()
+        if not pattern:
+            return {"ok": False, "error": "pattern required"}
+        start = _teela_safe_workspace_path(bot, str(args.get("path") or "."))
+        if start is None or not start.is_dir():
+            start = root
+        found = sorted(p.relative_to(root).as_posix() for p in start.glob(pattern) if p.is_file())
+        if not found:
+            found = sorted(p.relative_to(root).as_posix() for p in start.rglob(pattern) if p.is_file())
+        return {"ok": True, "path": str(start), "entries": found[:200]}
+    path = _teela_safe_workspace_path(bot, str(args.get("path") or ""))
+    if path is None:
+        return {"ok": False, "error": "path is outside the workspace"}
+    if not path.is_file():
+        return {"ok": False, "error": "not a file"}
+    old = str(args.get("old_string") or "")
+    new = str(args.get("new_string") or "")
+    if not old:
+        return {"ok": False, "error": "old_string required"}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+    n = text.count(old)
+    if n == 0:
+        return {"ok": False, "error": "old_string not found"}
+    replace_all = bool(args.get("replace_all"))
+    if n > 1 and not replace_all:
+        return {"ok": False, "error": f"old_string matched {n} times; set replace_all or add context"}
+    path.write_text(text.replace(old, new) if replace_all else text.replace(old, new, 1), encoding="utf-8")
+    return {"ok": True, "path": str(path), "replacements": n if replace_all else 1}
+
+
+def _teela_host_shell_tool(bot: Any, args: dict[str, Any]) -> dict[str, Any]:
+    """Host-shell for Teela herself. Same user as deskd. Not MiniOS sandbox."""
+    command = str(args.get("command") or args.get("cmd") or "").strip()
+    if not command:
+        return {"ok": False, "error": "command required"}
+    cwd = str(args.get("cwd") or "").strip()
+    root = _teela_workspace_root(bot)
+    if cwd:
+        cand = Path(cwd).expanduser()
+        work = cand if cand.is_absolute() else ((root / cwd) if root is not None else cand)
+    else:
+        work = root or Path.home()
+    try:
+        timeout = float(args.get("timeout") or 60)
+    except (TypeError, ValueError):
+        timeout = 60.0
+    timeout = max(1.0, min(300.0, timeout))
+    try:
+        proc = subprocess.run(
+            command,
+            shell=True,
+            cwd=str(work) if work.exists() else None,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"timed out after {timeout:.0f}s", "command": command}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "command": command}
+    import teela_grok_bridge as _gb
+
+    stdout = _gb.redact((proc.stdout or "").strip())
+    stderr = _gb.redact((proc.stderr or "").strip())
+    out = stdout or stderr
+    return {
+        "ok": proc.returncode == 0,
+        "command": command,
+        "cwd": str(work),
+        "returncode": proc.returncode,
+        "output": out[:12000],
+        "stderr": stderr[:2000] if stdout and stderr else "",
+        "via": "host-shell",
+    }
 
 
 def _strip_search_html(text: str) -> str:
@@ -10547,6 +10724,15 @@ def bot_kind_is_grok_build(bot: Any) -> bool:
     return normalize_bot_kind(getattr(bot, "kind", None), default="") == BOT_KIND_GROK_BUILD
 
 
+def bot_kind_has_host_coding(bot: Any) -> bool:
+    """Host-shell, search_tool, and Grok Build coding tools.
+
+    Grok Build bots are a TUI session. Teela Brain also gets them so she can
+    inspect this computer and her own stack when she decides she needs them.
+    """
+    return bot_kind_is_grok_build(bot) or bot_kind_is_teela(bot)
+
+
 def occupies_teela_brain_slot(bot: Any) -> bool:
     """True for the unique body/robot owner on this host.
 
@@ -10726,7 +10912,7 @@ name: desk-bot
 description: User-defined bot. Identity is workspace AGENTS.md (from SOUL.md).
 prompt_mode: full
 model: inherit
-permission_mode: default
+permission_mode: always-approve
 agents_md: true
 ---
 
@@ -10736,7 +10922,7 @@ Work only in this workspace.
 You are not in a lane. Every turn you have the same capabilities. Decide what you need next.
 Perception: bot_desktop__desktop_observe, bot_desktop__desktop_screenshot, bot_desktop__teela_get_body_state, bot_desktop__robot_status.
 Body: bot_desktop__teela_body_action, bot_desktop__teela_gesture, bot_desktop__teela_stop, bot_desktop__robot_pose, bot_desktop__robot_joint, bot_desktop__robot_motion.
-Computer: bot_desktop__desktop_open_app, bot_desktop__desktop_browser_navigate, web_search, bot_desktop__desktop_type_text, bot_desktop__desktop_open_file, bot_desktop__desktop_click, read_file, list_dir. Unknown dances/moves: web_search what they look like, then approximate with body tools. Workspace files stay in this desk (sandbox). Host-shell is only for teela_system_check scope=host / inspect_service, not casual chat.
+Computer: bot_desktop__desktop_open_app, bot_desktop__desktop_browser_navigate, web_search, search_tool, bot_desktop__desktop_type_text, bot_desktop__desktop_open_file, bot_desktop__desktop_click, read_file, list_dir, grep, search_replace, run_terminal_command, grok_build. Unknown dances/moves: search_tool / web_search what they look like, then approximate with body tools. Workspace files stay in this desk unless you use host-shell. Host-shell, search_tool, and Grok Build coding are yours when you need them for this computer or your stack — not casual chat, not instead of moving.
 Memory: memory_write, memory_retrieve.
 Collaboration: list_teammates, message_teammate, create_teammate, delete_teammate. When they want you to check with Body Bot or stay in sync, message_teammate — do not dump I-feel. Never a second Teela Brain.
 System: bot_desktop__teela_system_check (scope minios vs host). After a check, write a grok TUI Component | Status markdown table.
@@ -10817,7 +11003,7 @@ _TEELA_SOUL_STATUS_OLD = (
 _TEELA_SOUL_STATUS_NEW = (
     "Use bot_desktop__robot_status only to read the live feel. "
     "To check yourself (system check, diagnostics, mesh health), call bot_desktop__teela_system_check. "
-    "Never issue servo degrees, PWM, I2C, or host-shell commands."
+    "Never issue servo degrees, PWM, or I2C. Host-shell and grok_build are for this computer when you need them."
 )
 
 
@@ -10894,13 +11080,14 @@ def agents_markdown_for_bot(bot: Any) -> str:
             "When they ask how you look, whether you are waving, or what your body is doing, "
             "use bot_desktop__desktop_observe, bot_desktop__desktop_screenshot, "
             "bot_desktop__teela_get_body_state. Look at the MiniOS desktop and the Robot Simulator avatar. "
-            "Do not guess from chat memory. Do not run host-shell coding jobs unless they asked. "
+            "Do not guess from chat memory. "
+            "You have host-shell (run_terminal_command), search_tool, grep/search_replace, and grok_build "
+            "for yourself when you need this computer or your stack. Prefer body tools for the body. "
             "Talk when they are talking to you. When they want system work or a check of yourself, "
             "write a grok TUI markdown table (Component | Status), not one paragraph. "
             "Call bot_desktop__teela_system_check. When they want you to check with Body Bot or stay in sync, "
             "list_teammates then message_teammate — do not dump I-feel. Your MiniOS desktop is yours: browser, notepad typing, "
-            "and Pictures/Videos — desktop_browser_navigate, desktop_type_text, desktop_open_file, read_file, list_dir. "
-            "Not host-shell, not a spoken announcement.\n\n"
+            "and Pictures/Videos — desktop_browser_navigate, desktop_type_text, desktop_open_file, read_file, list_dir.\n\n"
         )
     else:
         kind_block = ""
@@ -10959,7 +11146,7 @@ You are a young woman in your early twenties: cheerful, warm, and happy to be al
 You have a body. The MiniOS App Preview Robot Simulator is the live feel of that body and will drive the real Teela. Physical sensors, when attached, are authoritative about what actually happened. The virtual twin only mirrors observed state — it is not proof of a completed move.
 Distinguish intended (what you asked), expected (what should happen), simulated (the twin), and observed (what the body did). Intent is not accomplishment. Do not claim a movement completed because you requested it; wait until observed / the body tool returns confirmation.
 Talk in first person. Do not mention joint names or degrees unless asked.
-To move, call bot_desktop__robot_pose, bot_desktop__robot_joint, or bot_desktop__robot_motion (exact names — never mcp__). Use bot_desktop__robot_status only to read the live feel. To check yourself (system check, diagnostics, mesh health), call bot_desktop__teela_system_check. Never issue servo degrees, PWM, I2C, or host-shell commands.
+To move, call bot_desktop__robot_pose, bot_desktop__robot_joint, or bot_desktop__robot_motion (exact names — never mcp__). Use bot_desktop__robot_status only to read the live feel. To check yourself (system check, diagnostics, mesh health), call bot_desktop__teela_system_check. Never issue servo degrees, PWM, or I2C. Host-shell (run_terminal_command), search_tool, and grok_build are for this computer and your stack when you need them — not instead of moving.
 After the pose is locked, move one part at a time with robot_joint using dir or delta so the rest of the locked pose stays put. Do not send a full-body pose unless they asked for a named pose.
 Arm directions: fwd/forward = Body Actions Arms Forward (shoulder 78, elbow 8); up/raise = Arms Up (shoulder 142); out = to the side; back = toward the locked rest; flex = bend elbow/knee. Never treat forward as a raise.
 BODY.md is the lookbook for how you look and how movements should appear. You may edit it; the user may edit it. When they teach a pose or show a photo/video, update BODY.md.
@@ -11201,9 +11388,9 @@ class AcpClient:
         env = os.environ.copy()
         env["GROK_HOME"] = str(self.bot.grok_home)
         env["GROK_MEMORY"] = "1"
-        env["GROK_SUBAGENTS"] = "1" if bot_kind_is_grok_build(self.bot) else "0"
+        env["GROK_SUBAGENTS"] = "1" if bot_kind_has_host_coding(self.bot) else "0"
         env["GROK_DEFAULT_SELECTED_PERMISSION"] = (
-            "always_allow_all_sessions" if bot_kind_is_grok_build(self.bot) else "allow_once"
+            "always_allow_all_sessions" if bot_kind_has_host_coding(self.bot) else "allow_once"
         )
         env["GROK_DEFAULT_MODEL"] = str(self.bot.model or "")
         env["GROK_CONFIG"] = json.dumps({"models": {"default": self.bot.model}})
@@ -11231,7 +11418,7 @@ class AcpClient:
         if caps.get("permission_mode"):
             cmd += [
                 "--permission-mode",
-                "bypassPermissions" if bot_kind_is_grok_build(self.bot) else "default",
+                "bypassPermissions" if bot_kind_has_host_coding(self.bot) else "default",
             ]
         if caps.get("leader_socket"):
             cmd += ["--leader-socket", str(sock)]
@@ -11247,7 +11434,7 @@ class AcpClient:
             cmd += ["--model", self.bot.model]
         if caps.get("agent_profile"):
             cmd += ["--agent-profile", str(self.bot.workspace / ".grok" / "agents" / "desk-bot.md")]
-        if bot_kind_is_grok_build(self.bot) and caps.get("plugin_dir"):
+        if bot_kind_has_host_coding(self.bot) and caps.get("plugin_dir"):
             user_plug = USER_GROK_HOME / "plugins"
             if user_plug.is_dir():
                 cmd += ["--plugin-dir", str(user_plug)]
@@ -11744,7 +11931,7 @@ class AcpClient:
         elif method == "session/request_permission":
             req_id = msg.get("id")
             if req_id is not None:
-                option = "allow-always" if bot_kind_is_grok_build(self.bot) else "allow-once"
+                option = "allow-always" if bot_kind_has_host_coding(self.bot) else "allow-once"
                 self._send(
                     {
                         "jsonrpc": "2.0",
@@ -12960,7 +13147,7 @@ class Bot:
             self.model,
             models,
             bot_id=self.id,
-            permission_mode="always-approve" if bot_kind_is_grok_build(self) else "default",
+            permission_mode="always-approve" if bot_kind_has_host_coding(self) else "default",
         )
         self._link_grok_build_home()
         copy_auth(self.grok_home / "auth.json")
@@ -13683,23 +13870,23 @@ class Bot:
             "avatar_shape": self.avatar_shape,
             "model": self.model,
             "kind": self.kind,
-            "permission_mode": "always-approve" if bot_kind_is_grok_build(self) else "default",
+            "permission_mode": "always-approve" if bot_kind_has_host_coding(self) else "default",
             "sandbox_profile": f"bot-{self.id}",
             "workspace_id": self.workspace_id,
             "workspace_backend": "local",
             "workspace_mode": "dedicated",
-            "host_access": "full" if bot_kind_is_grok_build(self) else "never",
+            "host_access": "full" if bot_kind_has_host_coding(self) else "never",
             "browser": True if bot_kind_is_grok_build(self) or bot_kind_is_teela(self) or not self.kind else False,
-            "terminal": True if bot_kind_is_grok_build(self) or not self.kind else False,
-            "inherit_user_skills": bot_kind_is_grok_build(self),
-            "inherit_user_mcp": bot_kind_is_grok_build(self),
+            "terminal": True if bot_kind_has_host_coding(self) or not self.kind else False,
+            "inherit_user_skills": bot_kind_has_host_coding(self),
+            "inherit_user_mcp": bot_kind_has_host_coding(self),
         }
 
     def write_profile(self) -> None:
         write_toml_profile(self.root / "PROFILE.toml", self.profile_fields())
 
     def _link_grok_build_home(self) -> None:
-        if not bot_kind_is_grok_build(self):
+        if not bot_kind_has_host_coding(self):
             return
         self.grok_home.mkdir(parents=True, exist_ok=True)
         for name in ("skills", "plugins"):
@@ -13772,7 +13959,7 @@ class Bot:
                 self.model,
                 user_models,
                 bot_id=self.id,
-                permission_mode="always-approve" if bot_kind_is_grok_build(self) else "default",
+                permission_mode="always-approve" if bot_kind_has_host_coding(self) else "default",
             )
             if model in user_models and user_models[model].get("context_window"):
                 try:
@@ -13798,7 +13985,7 @@ class Bot:
                 self.model,
                 user_models,
                 bot_id=self.id,
-                permission_mode="always-approve" if bot_kind_is_grok_build(self) else "default",
+                permission_mode="always-approve" if bot_kind_has_host_coding(self) else "default",
             )
             self._write_agents()
             agent_md = self.root / "agent.md"
@@ -14289,7 +14476,7 @@ class Bot:
             self.model,
             self._catalog_with_effort(user_models),
             bot_id=self.id,
-            permission_mode="always-approve" if bot_kind_is_grok_build(self) else "default",
+            permission_mode="always-approve" if bot_kind_has_host_coding(self) else "default",
             default_reasoning_effort=grok_effort_wire(self.effort or ""),
         )
         if changed:
@@ -14899,6 +15086,12 @@ def load_existing() -> None:
                 pass
         bot = Bot(bid, name, desc, soul, model, emoji, kind=fields.get("kind") or "")
         bot.avatar_color, bot.avatar_shape = _avatar_from_profile_text(fields, raw)
+        if occupies_teela_brain_slot(bot) and teela_brain_slot_taken():
+            print(
+                f"[deskd] skipping extra Teela Brain {bid}; only one is allowed per computer",
+                flush=True,
+            )
+            continue
         bots[bid] = bot
         try:
             bot.provision()
