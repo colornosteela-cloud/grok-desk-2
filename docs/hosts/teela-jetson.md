@@ -27,7 +27,7 @@ Same as body: Grok 4.6 cloud via **this** host's `~/.grok/auth.json` (`grok logi
 See `examples/desk.teela-jetson.json`. At install replace `10.0.0.yy` with this box's RFC1918 IP.
 
 - `node_name`: `teela-jetson`
-- `listen_host`: that IP
+- `listen_host`: that IP (also written automatically when you save a LAN peer)
 - `cluster_token`: **paste** the token generated on teela-brain into **Cluster token**. Leave Confirm blank. Not the xAI key.
 - `peers`: `http://10.0.0.10:8742` and body
 

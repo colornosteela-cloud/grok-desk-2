@@ -100,6 +100,30 @@ def validate_node_name(name: str) -> str:
     return n
 
 
+def is_rfc1918_ipv4(host: str) -> bool:
+    try:
+        ip = ipaddress.IPv4Address((host or "").strip())
+    except ipaddress.AddressValueError:
+        return False
+    return any(ip in net for net in _RFC1918)
+
+
+def has_lan_peers(peers: Any) -> bool:
+    """True if any configured peer URL is an RFC1918 IPv4 (not loopback)."""
+    if not isinstance(peers, list):
+        return False
+    for row in peers:
+        url = ""
+        if isinstance(row, dict):
+            url = str(row.get("url") or "")
+        else:
+            url = str(getattr(row, "url", "") or "")
+        host = urlparse(url).hostname or ""
+        if is_rfc1918_ipv4(host):
+            return True
+    return False
+
+
 def _ipv4_allowed(ip: ipaddress.IPv4Address) -> bool:
     if ip in _LINK_LOCAL:
         return False

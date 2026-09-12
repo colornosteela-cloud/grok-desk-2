@@ -84,7 +84,7 @@ Then open:
 http://127.0.0.1:8742/
 ```
 
-To expose the desk on your LAN, change **Grok Desk address** in **User & Grok Build Settings** to the host's LAN address. Do not expose Grok Desk directly to the public Internet.
+To expose the desk on your LAN, change **Grok Desk address** in **User & Grok Build Settings** to the host's LAN address, or save a LAN cluster peer — deskd then binds `0.0.0.0:8742` and writes this host's RFC1918 IP into `listen_host` so the other desk can list your bots. Do not expose Grok Desk directly to the public Internet. Set `GROK_DESK_LOOPBACK=1` to force loopback-only for tests.
 
 `start.sh` honors these optional environment variables:
 
@@ -96,6 +96,7 @@ GROK_DESK_CHROME=/path/to/chromium
 GROK_DESK_SANDBOX=off
 GROK_DESK_LLM=http://127.0.0.1:8081
 GROK_DESK_MODEL=Qwen3.8-27B
+GROK_DESK_LOOPBACK=1
 ```
 
 The local-model upstream variables were renamed from `GROK_DESK_VLLM*` (the upstream is not always vLLM — llama.cpp works too). The old names are still accepted as fallbacks.

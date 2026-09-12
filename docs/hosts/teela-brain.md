@@ -6,7 +6,7 @@ GPUs may be Intel Arc, NVIDIA, or AMD. Typical UI origin: `http://10.0.0.10:8742
 
 See `examples/desk.teela-brain.json`. At install:
 
-- `listen_host`: `10.0.0.10`
+- `listen_host`: `10.0.0.10` (also written automatically when you save a LAN peer such as teela-body)
 - `listen_port`: `8742`
 - `node_name`: `teela-brain`
 - `cluster_token`: **Generate once** on this host (Settings → LAN cluster, from `http://127.0.0.1:8742/`). Copy it. Do not put it in Confirm. Paste that same string into Cluster token on body and jetson.

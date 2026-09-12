@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Ubuntu:wght@300;400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/grokbot.css?v=81" />
+  <link rel="stylesheet" href="/grokbot.css?v=83" />
   <link rel="stylesheet" href="/styles.css?v=71" />
   <link rel="stylesheet" href="/vendor/xterm.css" />
 </head>
@@ -855,7 +855,7 @@
                 <label class="span-2">Local Grok home<input id="settings-grok-home" value="~/.grok" autocomplete="off" /></label>
                 <label>Grok Desk address<input id="settings-desk-host" placeholder="127.0.0.1" autocomplete="off" /></label>
                 <label>Port<input id="settings-desk-port" type="number" min="1" max="65535" step="1" /></label>
-                <p class="span-2 muted" id="settings-desk-hint">Default 127.0.0.1 stays on this computer. Set your LAN IP (for example 10.0.0.10) to open Grok Desk from other devices at http://10.0.0.10:8742/</p>
+                <p class="span-2 muted" id="settings-desk-hint">Default 127.0.0.1 stays on this computer only. Saving a LAN cluster peer automatically binds this desk on your LAN IP so the other host can list your bots.</p>
               </div>
             </div>
           </section>
@@ -1151,7 +1151,7 @@
 
   <script src="/vendor/xterm.js"></script>
   <script src="/vendor/xterm-addon-fit.js"></script>
-  <script src="/grokbot-ui.js?v=59"></script>
-  <script src="/app.js?v=188"></script>
+  <script src="/grokbot-ui.js?v=61"></script>
+  <script src="/app.js?v=190"></script>
 </body>
 </html>

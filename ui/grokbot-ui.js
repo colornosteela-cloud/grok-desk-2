@@ -1613,8 +1613,8 @@
     const port = Number($("settings-desk-port")?.value || 8742) || 8742;
     const loopback = /^(127\.0\.0\.1|localhost)$/i.test(host);
     hint.textContent = loopback
-      ? `Default 127.0.0.1 stays on this computer only. Set your LAN IP (for example 10.0.0.10) to open Grok Desk from other devices at http://10.0.0.10:${port}/`
-      : `Other devices on the network can open http://${host}:${port}/ — this computer still works at http://127.0.0.1:${port}/`;
+      ? `Default 127.0.0.1 stays on this computer only. Saving a LAN cluster peer automatically binds this desk on your LAN IP so the other host can list your bots (http://<lan-ip>:${port}/).`
+      : `Other devices on the network can open http://${host}:${port}/ — this computer still works at http://127.0.0.1:${port}/. LAN cluster peers reach this desk at that address.`;
   }
   async function populateSettingsForm() {
     $("settings-display-name").value = userSettings.profile.displayName || "";
@@ -1636,7 +1636,12 @@
             baseUrl: m.baseUrl || m.base_url || "",
             apiBackend: m.apiBackend || m.api_backend || "chat_completions",
             contextWindow: m.contextWindow || m.context_window || 0,
-            maxCompletionTokens: m.maxCompletionTokens || m.max_completion_tokens || 0,
+            maxCompletionTokens: (() => {
+              const n = Number(m.maxCompletionTokens || m.max_completion_tokens || 0);
+              if (n > 0) return n;
+              const id = String(m.key || m.id || m.model || "").toLowerCase();
+              return id.startsWith("grok") ? 65536 : 0;
+            })(),
             apiKey: m.apiKey || m.api_key || "",
             weights: m.weights || "",
           }));
@@ -2129,14 +2134,21 @@
     (bots || []).forEach((bot) => {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "rail-agent" + (bot.id === selectedId ? " active" : "");
-      btn.title = bot.kind === "grok-build" ? `${bot.name} · Grok Build` : `${bot.name} · Teela Brain`;
+      const stub = !!bot.peer_stub;
+      const offline = !!(bot.node_status && bot.node_status !== "ok");
+      btn.className = "rail-agent" + (bot.id === selectedId ? " active" : "") + (stub ? " peer-stub" : "") + (offline ? " is-offline" : "");
+      const kindLabel = stub ? (bot.status || "offline") : bot.kind === "grok-build" ? "Grok Build" : "Teela Brain";
+      const node = bot.node ? ` · ${bot.node}` : "";
+      btn.title = `${bot.name} · ${kindLabel}${node}`;
       btn.dataset.agentId = bot.id;
-      btn.innerHTML = avatarHTML(bot) + (bot.unread ? '<span class="rail-unread"></span>' : "");
-      btn.addEventListener("click", () => {
-        onSelect(bot.id);
-        setMobileView("chat");
-      });
+      const showNode = !!(bot.node && (bot.remote || stub || (window.deskState?.peers || []).length));
+      btn.innerHTML = avatarHTML(bot) + (bot.unread ? '<span class="rail-unread"></span>' : "") + (showNode ? `<span class="rail-node${offline ? " offline" : ""}">${escapeHtml(bot.node)}</span>` : "");
+      if (!stub) {
+        btn.addEventListener("click", () => {
+          onSelect(bot.id);
+          setMobileView("chat");
+        });
+      }
       rail.appendChild(btn);
     });
     const add = document.createElement("button");
@@ -2154,25 +2166,31 @@
     const all = bots || [];
     featured.innerHTML = all
       .slice(0, 3)
-      .map(
-        (a) => `<div class="featured-card" data-agent="${a.id}" data-agent-id="${a.id}">
+      .map((a) => {
+        const node = a.node && (a.remote || a.peer_stub || (window.deskState?.peers || []).length)
+          ? `<span class="node-chip${a.remote || a.peer_stub ? " remote" : " local"}${a.node_status && a.node_status !== "ok" ? " offline" : ""}">${escapeHtml(a.node)}${a.node_status && a.node_status !== "ok" ? " (offline)" : ""}</span>`
+          : "";
+        return `<div class="featured-card${a.peer_stub ? " peer-stub" : ""}" data-agent="${a.id}" data-agent-id="${a.id}" data-peer-stub="${a.peer_stub ? "1" : ""}">
         ${avatarHTML(a)}
-        <div class="agent-name">${escapeHtml(a.name)}</div>
-
-      </div>`
-      )
+        <div class="agent-name">${escapeHtml(a.name)}${a.peer_stub ? "" : node}</div>
+      </div>`;
+      })
       .join("");
     list.innerHTML = all
       .slice(3)
-      .map(
-        (a) => `<div class="mobile-row" data-agent="${a.id}" data-agent-id="${a.id}">
+      .map((a) => {
+        const node = a.node && !a.peer_stub && (a.remote || (window.deskState?.peers || []).length)
+          ? `<span class="node-chip${a.remote ? " remote" : " local"}${a.node_status && a.node_status !== "ok" ? " offline" : ""}">${escapeHtml(a.node)}${a.node_status && a.node_status !== "ok" ? " (offline)" : ""}</span>`
+          : "";
+        return `<div class="mobile-row${a.peer_stub ? " peer-stub" : ""}" data-agent="${a.id}" data-agent-id="${a.id}" data-peer-stub="${a.peer_stub ? "1" : ""}">
         ${avatarHTML(a)}
-        <div class="agent-main"><div class="agent-name">${escapeHtml(a.name)}</div><div class="agent-preview">${escapeHtml(a.status || "Ready")}</div></div>
-      </div>`
-      )
+        <div class="agent-main"><div class="agent-name">${escapeHtml(a.name)}${node}</div><div class="agent-preview">${escapeHtml(a.status || "Ready")}</div></div>
+      </div>`;
+      })
       .join("");
     [...featured.querySelectorAll("[data-agent]"), ...list.querySelectorAll("[data-agent]")].forEach((el) => {
       el.addEventListener("click", () => {
+        if (el.dataset.peerStub === "1") return;
         onSelect(el.dataset.agent);
         setMobileView("chat");
       });
@@ -2550,9 +2568,13 @@
         if (Array.isArray(j.peers)) clusterPeers = j.peers.map((p) => ({ ...p }));
         if (!clusterPeers.length) clusterPeers = peers;
         clusterTokenSet = j.cluster_token_set != null ? Boolean(j.cluster_token_set) : clusterTokenSet;
+        if (j.listen_host && $("settings-desk-host")) {
+          $("settings-desk-host").value = j.listen_host;
+          updateDeskAccessHint();
+        }
         renderClusterPeers();
         updateClusterTokenState();
-        flashSettingsStatus(`Saved ${readClusterPeersFromDom().length} peer(s). Next: step 4 Test connection — do this on both computers.`, 10000);
+        flashSettingsStatus(`Saved ${readClusterPeersFromDom().length} peer(s). This desk now listens on the LAN so those hosts can see your bots. Next: step 4 Test connection — do this on both computers.`, 10000);
       } catch (err) {
         flashSettingsStatus(String(err.message || err), 10000, "error");
       }
@@ -2724,6 +2746,10 @@
           clusterClearRequested = false;
           if (j.cluster_token_set != null) clusterTokenSet = Boolean(j.cluster_token_set);
           if (Array.isArray(j.peers)) clusterPeers = j.peers.map((p) => ({ ...p }));
+          if (j.listen_host && $("settings-desk-host")) {
+            $("settings-desk-host").value = j.listen_host;
+            updateDeskAccessHint();
+          }
           renderClusterPeers();
           updateClusterTokenState();
           const n = (j.peers || []).length;

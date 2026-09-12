@@ -56,9 +56,9 @@ On **teela-brain**, Add peer:
 - name: `teela-body`
 - URL: `http://<body-LAN-IP>:8742` (the IPv4 of body, not a hostname)
 
-Then **Save** on each host. Profile → Grok Desk address on each host should be **that** host’s LAN IP so the others can reach it.
+Then **Save peers** on each host. Saving an RFC1918 peer URL automatically promotes this desk off loopback: `listen_host` becomes this machine’s LAN IP and deskd binds `0.0.0.0:8742` so the other host can fetch `/v1/cluster/bots`. You do not have to type the LAN IP into Profile first. `GROK_DESK_LOOPBACK=1` keeps the old loopback-only bind for tests.
 
-After both hosts are saved and **deskd is running on each LAN IP**, the hallway on either origin lists local bots plus the other host’s bots. If a peer is offline, the hallway shows that under Search — you will not see the other computer’s agents until its `./start.sh` is listening on `http://<its-LAN-IP>:8742/`.
+After both hosts are saved and **deskd is running on each LAN IP**, the hallway on either origin lists local bots plus the other host’s bots (and a stub row for a peer that is configured but offline). If a peer is down, Search shows `Peers: teela-body offline…` — you will not see that computer’s agents until its `./start.sh` is listening on `http://<its-LAN-IP>:8742/`.
 
 ### 4. Test connection
 

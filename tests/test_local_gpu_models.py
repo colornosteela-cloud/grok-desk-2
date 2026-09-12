@@ -953,6 +953,31 @@ class HostCatalogTests(unittest.TestCase):
     def setUp(self) -> None:
         d.reset_local_llm_probe()
 
+    def test_grok_zero_max_completion_tokens_is_rejected(self) -> None:
+        self.assertEqual(d.coerce_max_completion_tokens("grok-4.6", {"max_completion_tokens": 0}), 65536)
+        self.assertEqual(d.coerce_max_completion_tokens("grok-4.5", {}), 65536)
+        self.assertEqual(d.coerce_max_completion_tokens("qwen3-8-27b", {"max_completion_tokens": 0}), None)
+        self.assertEqual(d.coerce_max_completion_tokens("qwen3-8-27b", {"max_completion_tokens": 32768}), 32768)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = Path(tmp.name)
+        d.write_child_config(
+            home,
+            "grok-4.6",
+            {
+                "grok-4.6": {
+                    "model": "grok-4.6",
+                    "name": "Grok 4.6",
+                    "api_backend": "responses",
+                    "context_window": 500000,
+                    "max_completion_tokens": 0,
+                }
+            },
+        )
+        text = (home / "config.toml").read_text(encoding="utf-8")
+        self.assertIn("max_completion_tokens = 65536", text)
+        self.assertNotIn("max_completion_tokens = 0", text)
+
     def test_toml_model_keys_quote_dots(self) -> None:
         self.assertEqual(d.toml_key("qwen38-27b"), "qwen38-27b")
         self.assertEqual(d.toml_key("grok-4.6"), '"grok-4.6"')

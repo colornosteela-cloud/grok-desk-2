@@ -1501,12 +1501,37 @@ document.addEventListener("keydown", (e) => {
 });
 
 function nodeChipHTML(b) {
-  if (!b?.node) return "";
+  if (!b?.node || b.peer_stub) return "";
   const peers = state.peers || [];
   if (!b.remote && !peers.length) return "";
   const off = b.node_status && b.node_status !== "ok" ? " (offline)" : "";
-  const cls = "node-chip" + (b.remote ? " remote" : " local") + (b.node_status === "offline" ? " offline" : "");
+  const cls = "node-chip" + (b.remote ? " remote" : " local") + (b.node_status && b.node_status !== "ok" ? " offline" : "");
   return `<span class="${cls}">${escapeHtml(b.node)}${off}</span>`;
+}
+
+function peerPlaceholderBots() {
+  const peers = state.peers || [];
+  const seen = new Set((state.bots || []).filter((b) => b.remote && b.node).map((b) => b.node));
+  return peers
+    .filter((p) => p && p.name && !seen.has(p.name))
+    .map((p) => {
+      const st = p.status || "offline";
+      return {
+        id: `peer:${p.name}`,
+        name: p.name,
+        status: st === "ok" ? "no bots yet" : st,
+        node: p.name,
+        remote: true,
+        node_status: st,
+        peer_stub: true,
+        kind: "peer",
+        avatar: { kind: "emoji", value: "◌", color: "#9ca3af", shape: "" },
+      };
+    });
+}
+
+function listedBots() {
+  return [...(state.bots || []), ...peerPlaceholderBots()];
 }
 
 function mergeBot(prev, incoming) {
@@ -1522,16 +1547,19 @@ function renderRoster() {
   const host = $("roster");
   if (!host) return;
   host.innerHTML = "";
-  for (const b of state.bots) {
+  for (const b of listedBots()) {
     const hay = `${b.avatar?.value || ""} ${b.name} ${b.status} ${hostLabel(b)}`.toLowerCase();
     if (q && !hay.includes(q)) continue;
     const row = document.createElement("div");
-    row.className = "agent-row" + (state.selected === b.id ? " active" : "");
+    const stub = !!b.peer_stub;
+    const offline = !!(b.node_status && b.node_status !== "ok");
+    row.className = "agent-row" + (state.selected === b.id ? " active" : "") + (stub ? " peer-stub" : "") + (offline ? " is-offline" : "");
     row.dataset.agentId = b.id;
-    row.title = b.name;
+    row.title = stub ? `${b.name} · ${b.status || "offline"}` : b.name;
     const av = window.DeskUI ? DeskUI.avatarHTML(b) : `<div class="avatar">${escapeHtml(b.avatar?.value || "◉")}</div>`;
-    row.innerHTML = `${av}<div class="agent-main"><div class="agent-name">${escapeHtml(b.name)}</div><div class="agent-preview">${escapeHtml(b.status || "Ready")}</div></div>`;
-    row.onclick = () => selectBot(b.id);
+    const chip = nodeChipHTML(b);
+    row.innerHTML = `${av}<div class="agent-main"><div class="agent-name">${escapeHtml(b.name)}${chip}</div><div class="agent-preview">${escapeHtml(b.status || "Ready")}</div></div>`;
+    if (!stub) row.onclick = () => selectBot(b.id);
     host.appendChild(row);
   }
   const hint = $("peer-hint");
@@ -1572,8 +1600,9 @@ function renderRoster() {
     }
   }
   if (window.DeskUI) {
-    DeskUI.renderRail(state.bots, state.selected, selectBot);
-    DeskUI.renderMobile(state.bots, selectBot);
+    const listed = listedBots();
+    DeskUI.renderRail(listed, state.selected, selectBot);
+    DeskUI.renderMobile(listed, selectBot);
   }
 }
 
@@ -2364,6 +2393,7 @@ async function restoreSelectedBot() {
 }
 
 async function selectBot(id) {
+  if (!id || String(id).startsWith("peer:")) return;
   state.selected = id;
   connectVirtualBodyWs(id);
   try { localStorage.setItem("grok-desk-selected-bot", id); } catch { /* ignore */ }

@@ -54,6 +54,8 @@ from cluster import (
     Cluster,
     bot_id_from_path,
     cluster_token_fp,
+    has_lan_peers,
+    is_rfc1918_ipv4,
     normalize_cluster_token,
     timeout_for,
     validate_node_name,
@@ -196,11 +198,62 @@ def is_loopback_host(host: str) -> bool:
     return h in ("", "127.0.0.1", "localhost", "::1")
 
 
+def force_loopback() -> bool:
+    return os.environ.get("GROK_DESK_LOOPBACK", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def lan_peers_configured() -> bool:
+    return has_lan_peers(read_desk_file().get("peers"))
+
+
+def detect_lan_ipv4() -> str:
+    """Best-effort RFC1918 IPv4 for this host, or empty."""
+    candidates: list[str] = []
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(("8.8.8.8", 80))
+            candidates.append(sock.getsockname()[0])
+        finally:
+            sock.close()
+    except OSError:
+        pass
+    try:
+        host_ip = socket.gethostbyname(socket.gethostname())
+        if host_ip:
+            candidates.append(host_ip)
+    except OSError:
+        pass
+    for ip in candidates:
+        if is_rfc1918_ipv4(ip):
+            return ip
+    return ""
+
+
+def desired_listen_host(host: str) -> str:
+    """Keep an explicit LAN address; promote loopback when LAN cluster peers exist."""
+    if force_loopback():
+        return host or "127.0.0.1"
+    if not is_loopback_host(host):
+        return host
+    if not lan_peers_configured():
+        return host or "127.0.0.1"
+    return detect_lan_ipv4() or "0.0.0.0"
+
+
 def bind_address(host: str) -> str:
-    return "127.0.0.1" if is_loopback_host(host) else "0.0.0.0"
+    if force_loopback():
+        return "127.0.0.1"
+    if not is_loopback_host(host) or lan_peers_configured():
+        return "0.0.0.0"
+    return "127.0.0.1"
 
 
 def lan_mode() -> bool:
+    if force_loopback():
+        return False
+    if lan_peers_configured():
+        return True
     return not is_loopback_host(LISTEN_HOST)
 
 
@@ -443,18 +496,13 @@ def with_voice_note(turn_text: str, *, tui: bool = False, bot: Any = None) -> st
 
 
 def access_host() -> str:
-    if is_loopback_host(LISTEN_HOST):
+    if force_loopback():
         return "127.0.0.1"
-    if LISTEN_HOST not in ("0.0.0.0", "*", "all"):
+    if is_loopback_host(LISTEN_HOST) and not lan_peers_configured():
+        return "127.0.0.1"
+    if LISTEN_HOST not in ("0.0.0.0", "*", "all") and not is_loopback_host(LISTEN_HOST):
         return LISTEN_HOST
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.connect(("8.8.8.8", 80))
-        ip = sock.getsockname()[0]
-        sock.close()
-        return ip or "0.0.0.0"
-    except OSError:
-        return "0.0.0.0"
+    return detect_lan_ipv4() or "0.0.0.0"
 
 
 def access_url() -> str:
@@ -474,6 +522,10 @@ def public_listen() -> dict[str, Any]:
 def apply_listen(host: str, port: Any = None) -> dict[str, Any]:
     global LISTEN_HOST, LISTEN_PORT
     host, port = parse_listen(host, port, LISTEN_PORT)
+    promoted = desired_listen_host(host)
+    if promoted != host:
+        print(f"[deskd] LAN cluster peers set; listen_host {host} → {promoted} (bind 0.0.0.0)", flush=True)
+        host = promoted
     changed = host != LISTEN_HOST or int(port) != int(LISTEN_PORT)
     LISTEN_HOST = host
     LISTEN_PORT = int(port)
@@ -483,6 +535,13 @@ def apply_listen(host: str, port: Any = None) -> dict[str, Any]:
     if changed:
         _rebind_http.set()
     return out
+
+
+def ensure_lan_listen_for_cluster() -> dict[str, Any] | None:
+    """If RFC1918 peers exist and we are still loopback, advertise LAN and rebind."""
+    if force_loopback() or not lan_peers_configured() or not is_loopback_host(LISTEN_HOST):
+        return None
+    return apply_listen(LISTEN_HOST, LISTEN_PORT)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1456,9 +1515,18 @@ def register_user_model(body: dict[str, Any]) -> dict[str, Any]:
         if src in (None, ""):
             continue
         try:
-            tbl[key] = int(src)
+            n = int(src)
         except (TypeError, ValueError):
-            pass
+            continue
+        if key == "max_completion_tokens" and n <= 0:
+            tbl.pop(key, None)
+            continue
+        tbl[key] = n
+    cap = coerce_max_completion_tokens(mid, tbl)
+    if cap is not None:
+        tbl["max_completion_tokens"] = cap
+    else:
+        tbl.pop("max_completion_tokens", None)
     catalog[mid] = tbl
     if not default:
         default = mid
@@ -1675,6 +1743,20 @@ _MODEL_TABLE_FIELDS = {
 }
 
 
+def coerce_max_completion_tokens(mid: str, tbl: dict[str, Any] | None) -> int | None:
+    """Grok CLI sends this as max_tokens. 0 is rejected by the xAI API."""
+    tbl = tbl or {}
+    try:
+        n = int(tbl.get("max_completion_tokens") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n > 0:
+        return n
+    if str(mid or "").lower().startswith("grok"):
+        return 65536
+    return None
+
+
 def toml_key(name: str) -> str:
     """Quote TOML keys that contain dots so grok-4.6 is not parsed as grok-4.6 nested."""
     s = str(name or "")
@@ -1753,6 +1835,12 @@ def write_user_models(default: str, catalog: dict[str, Any]) -> None:
     for mid, tbl in catalog.items():
         if not isinstance(tbl, dict):
             continue
+        tbl = dict(tbl)
+        cap = coerce_max_completion_tokens(mid, tbl)
+        if cap is None:
+            tbl.pop("max_completion_tokens", None)
+        else:
+            tbl["max_completion_tokens"] = cap
         lines.append(f"[model.{toml_key(mid)}]")
         for key, val in tbl.items():
             if val is None or val == "":
@@ -1801,7 +1889,14 @@ def catalog_from_settings_rows(rows: list[Any]) -> dict[str, Any]:
                     val = int(val)
                 except (TypeError, ValueError):
                     continue
+                if dst == "max_completion_tokens" and val <= 0:
+                    continue
             tbl[dst] = val
+        cap = coerce_max_completion_tokens(mid, tbl)
+        if cap is not None:
+            tbl["max_completion_tokens"] = cap
+        else:
+            tbl.pop("max_completion_tokens", None)
         if "model" not in tbl:
             tbl["model"] = mid
         out[mid] = tbl
@@ -1823,7 +1918,7 @@ def settings_model_rows() -> tuple[str, list[dict[str, Any]]]:
                 "baseUrl": tbl.get("base_url") or "",
                 "apiBackend": tbl.get("api_backend") or "",
                 "contextWindow": tbl.get("context_window") or 0,
-                "maxCompletionTokens": tbl.get("max_completion_tokens") or 0,
+                "maxCompletionTokens": coerce_max_completion_tokens(mid, tbl) or 0,
                 "apiKey": tbl.get("api_key") or "",
                 "weights": tbl.get("weights") or tbl.get("model_dir") or "",
                 "local": is_local_gpu_model(mid, tbl),
@@ -10464,6 +10559,12 @@ def write_child_config(
     for mid, tbl in models.items():
         if not isinstance(tbl, dict):
             continue
+        tbl = dict(tbl)
+        cap = coerce_max_completion_tokens(mid, tbl)
+        if cap is None:
+            tbl.pop("max_completion_tokens", None)
+        else:
+            tbl["max_completion_tokens"] = cap
         lines.append(f"[model.{toml_key(mid)}]")
         saw_idle = False
         for k, v in tbl.items():
@@ -17001,6 +17102,9 @@ class Handler(BaseHTTPRequestHandler):
                         cluster.reload()
                         cluster.stop_fanin()
                         cluster.start_fanin()
+                    lan_out = ensure_lan_listen_for_cluster()
+                    if lan_out:
+                        listen_out = lan_out
                 if "models" in body and isinstance(body.get("models"), list):
                     save_user_model_catalog(
                         body["models"],
@@ -18109,6 +18213,11 @@ def main() -> None:
     cfg = load_desk_config()
     LISTEN_HOST = cfg["listen_host"]
     LISTEN_PORT = int(cfg["listen_port"])
+    chosen = desired_listen_host(LISTEN_HOST)
+    if chosen != LISTEN_HOST:
+        print(f"[deskd] LAN cluster peers set; listen_host {LISTEN_HOST} → {chosen} (bind 0.0.0.0)", flush=True)
+        LISTEN_HOST = chosen
+        patch_desk_config({"listen_host": LISTEN_HOST, "listen_port": LISTEN_PORT})
     if not read_desk_file().get("node_name"):
         try:
             patch_desk_config({"node_name": validate_node_name(str(cfg.get("node_name") or socket.gethostname()))})

@@ -132,6 +132,121 @@ class DeskConfigTests(unittest.TestCase):
         self.assertFalse(self.path.with_name(self.path.name + ".tmp").exists())
 
 
+class LanAutoListenTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        self.path = self.home / "desk.json"
+        self._orig = d.desk_config_path
+        d.desk_config_path = lambda: self.path
+
+    def tearDown(self) -> None:
+        d.desk_config_path = self._orig
+        d._rebind_http.clear()
+        self.tmp.cleanup()
+
+    def _read(self) -> dict:
+        return json.loads(self.path.read_text(encoding="utf-8"))
+
+    def test_bind_stays_loopback_without_lan_peers(self) -> None:
+        d.write_desk_file({"listen_host": "127.0.0.1", "peers": []})
+        self.assertFalse(d.lan_peers_configured())
+        self.assertEqual(d.bind_address("127.0.0.1"), "127.0.0.1")
+
+    def test_bind_all_interfaces_when_lan_peers(self) -> None:
+        d.write_desk_file(
+            {
+                "listen_host": "127.0.0.1",
+                "peers": [{"name": "teela-body", "url": "http://10.0.0.118:8742"}],
+            }
+        )
+        self.assertTrue(d.lan_peers_configured())
+        self.assertEqual(d.bind_address("127.0.0.1"), "0.0.0.0")
+
+    def test_loopback_peer_does_not_promote(self) -> None:
+        d.write_desk_file(
+            {
+                "listen_host": "127.0.0.1",
+                "peers": [{"name": "local", "url": "http://127.0.0.1:18742"}],
+            }
+        )
+        self.assertFalse(d.lan_peers_configured())
+        self.assertEqual(d.bind_address("127.0.0.1"), "127.0.0.1")
+        self.assertEqual(d.desired_listen_host("127.0.0.1"), "127.0.0.1")
+
+    def test_force_loopback_env_keeps_loopback(self) -> None:
+        d.write_desk_file(
+            {
+                "listen_host": "127.0.0.1",
+                "peers": [{"name": "teela-body", "url": "http://10.0.0.118:8742"}],
+            }
+        )
+        with patch.dict(os.environ, {"GROK_DESK_LOOPBACK": "1"}):
+            self.assertEqual(d.bind_address("127.0.0.1"), "127.0.0.1")
+            self.assertEqual(d.desired_listen_host("127.0.0.1"), "127.0.0.1")
+            self.assertFalse(d.lan_mode())
+
+    def test_apply_listen_promotes_loopback_when_lan_peer(self) -> None:
+        d.write_desk_file(
+            {
+                "listen_host": "127.0.0.1",
+                "listen_port": 8742,
+                "cluster_token": "secret",
+                "peers": [{"name": "teela-body", "url": "http://10.0.0.118:8742"}],
+            }
+        )
+        with (
+            patch.object(d, "LISTEN_HOST", "127.0.0.1"),
+            patch.object(d, "LISTEN_PORT", 8742),
+            patch.object(d, "detect_lan_ipv4", return_value="10.0.0.10"),
+        ):
+            out = d.apply_listen("127.0.0.1", 8742)
+        self.assertEqual(out["listen_host"], "10.0.0.10")
+        self.assertTrue(out["lan"])
+        self.assertEqual(out["bind"], "0.0.0.0")
+        self.assertTrue(out["rebind"])
+        self.assertEqual(self._read()["listen_host"], "10.0.0.10")
+        self.assertEqual(self._read()["cluster_token"], "secret")
+
+    def test_desired_listen_falls_back_to_all_interfaces(self) -> None:
+        d.write_desk_file({"peers": [{"name": "body", "url": "http://192.168.1.20:8742"}]})
+        with patch.object(d, "detect_lan_ipv4", return_value=""):
+            self.assertEqual(d.desired_listen_host("127.0.0.1"), "0.0.0.0")
+
+    def test_ensure_lan_listen_promotes_then_skips(self) -> None:
+        d.write_desk_file(
+            {
+                "listen_host": "127.0.0.1",
+                "listen_port": 8742,
+                "peers": [{"name": "teela-body", "url": "http://10.0.0.118:8742"}],
+            }
+        )
+        with (
+            patch.object(d, "LISTEN_HOST", "127.0.0.1"),
+            patch.object(d, "LISTEN_PORT", 8742),
+            patch.object(d, "detect_lan_ipv4", return_value="10.0.0.10"),
+        ):
+            out = d.ensure_lan_listen_for_cluster()
+            self.assertIsNotNone(out)
+            self.assertEqual(out["listen_host"], "10.0.0.10")
+            self.assertTrue(out["rebind"])
+            self.assertIsNone(d.ensure_lan_listen_for_cluster())
+
+
+class HasLanPeersTests(unittest.TestCase):
+    def test_rfc1918_yes_loopback_no(self) -> None:
+        from cluster import has_lan_peers, is_rfc1918_ipv4
+
+        self.assertTrue(is_rfc1918_ipv4("10.0.0.10"))
+        self.assertTrue(is_rfc1918_ipv4("192.168.1.1"))
+        self.assertFalse(is_rfc1918_ipv4("127.0.0.1"))
+        self.assertFalse(is_rfc1918_ipv4("8.8.8.8"))
+        self.assertTrue(has_lan_peers([{"name": "body", "url": "http://10.0.0.118:8742"}]))
+        self.assertFalse(has_lan_peers([{"name": "local", "url": "http://127.0.0.1:8742"}]))
+        self.assertFalse(has_lan_peers([]))
+        self.assertFalse(has_lan_peers(None))
+
+
 class AnnounceTests(unittest.TestCase):
     def test_announce_indexes_remote_bot(self) -> None:
         from cluster import Cluster, Peer

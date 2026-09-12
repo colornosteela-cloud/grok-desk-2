@@ -16,7 +16,7 @@ cd Grok-desk && git pull
 
 `[Errno 2] '/root/.local/bin/grok'` means deskd was started with sudo. Stop it, run `./start.sh` as the grok user.
 
-Grok Desk address (listen_host) must be body’s **LAN IP** (for example `10.0.0.118`), not `127.0.0.1`, and port **8742 must accept inbound** LAN connections. Otherwise body can message brain, but brain cannot list or message body bots (connection refused). Check with `ss -ltn | grep 8742` — it should show `0.0.0.0:8742` or the LAN IP, not only `127.0.0.1:8742`.
+Saving a LAN peer (brain at `http://10.0.0.10:8742`) automatically sets `listen_host` to body’s RFC1918 IP and binds `0.0.0.0:8742`. If you still set Grok Desk address by hand, use body’s **LAN IP** (for example `10.0.0.118`), not `127.0.0.1`. Otherwise brain cannot list or message body bots (connection refused). Check with `ss -ltn | grep 8742` — it should show `0.0.0.0:8742` or the LAN IP, not only `127.0.0.1:8742`.
 
 ## Cognition (v1)
 
