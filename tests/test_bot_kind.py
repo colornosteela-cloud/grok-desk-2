@@ -146,6 +146,19 @@ class BotKindTests(unittest.TestCase):
         self.assertEqual(out["messages"][0]["content"], "hi")
         self.assertTrue(all(m.get("role") != "system" for m in out["messages"]))
 
+    def test_grok_build_has_no_robot_simulator(self) -> None:
+        self.assertFalse(d.bot_kind_has_robot_simulator(_KindBot("grok-build")))
+        self.assertTrue(d.bot_kind_has_robot_simulator(_KindBot("teela-brain")))
+        src = Path(d.__file__).read_text(encoding="utf-8")
+        self.assertIn("Grok Build bots do not have the Robot Simulator", src)
+        app = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function botHasRobotSimulator", app)
+        self.assertIn("function syncRobotSimulatorForBot", app)
+        self.assertIn("function unloadRobotSimulator", app)
+        ui = (ROOT / "ui" / "grokbot-ui.js").read_text(encoding="utf-8")
+        self.assertIn("function selectedHasRobotSimulator", ui)
+        self.assertIn("if (!selectedHasRobotSimulator()) return;", ui)
+
     def test_desktop_mcp_tool_split(self) -> None:
         grok = {t["name"] for t in dm.tools_for_kind("grok-build")}
         teela = {t["name"] for t in dm.tools_for_kind("teela-brain")}

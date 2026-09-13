@@ -5287,6 +5287,7 @@ body[data-layout="phone"].mobile-chat .chat-column {
 .minios-dev-output.fail { box-shadow: inset 3px 0 #e05252; }
 .editor-dot { background:#8b5cf6; }
 .preview-dot { background:#22c55e; }
+body.minios-no-robot .dock-app[data-desktop-app="preview"] span { font-size:14px; }
 .dev-dot { background:#eab308; }
 .agent-desktop-cursor {
   position:absolute; left:0; top:0; width:24px; height:32px; z-index:9999; pointer-events:none;

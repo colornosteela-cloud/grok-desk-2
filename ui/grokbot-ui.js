@@ -613,13 +613,19 @@
     if (surface) document.dispatchEvent(new CustomEvent("desk-app", { detail: { app: win.dataset.windowApp, surface } }));
     requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
   }
+  function selectedHasRobotSimulator() {
+    const st = window.deskState;
+    const bot = (st?.bots || []).find((x) => x.id === st.selected);
+    if (typeof window.botHasRobotSimulator === "function") return window.botHasRobotSimulator(bot);
+    return Boolean(bot) && bot.kind !== "grok-build";
+  }
   function openDesktopWindow(name, { focus = true } = {}) {
     if (name === "workspace") name = "files";
     const win = getAppWindow(name);
     if (!win) return;
     win.dataset.open = "true";
     win.classList.remove("hidden-window", "minimized-window");
-    if (name === "preview" && typeof window.loadRobotSimulator === "function") {
+    if (name === "preview" && selectedHasRobotSimulator() && typeof window.loadRobotSimulator === "function") {
       const frame = $("app-preview-frame");
       const src = frame?.getAttribute("src") || "";
       if (!src || src === "about:blank") window.loadRobotSimulator();
@@ -677,6 +683,7 @@
     focusDesktopWindow(win);
   }
   function showRobotOnAgentDesktop() {
+    if (!selectedHasRobotSimulator()) return;
     const win = getAppWindow("preview");
     if (!win) return;
     if (typeof window.loadRobotSimulator === "function") {

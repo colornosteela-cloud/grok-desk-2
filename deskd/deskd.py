@@ -11722,6 +11722,11 @@ def bot_kind_has_host_coding(bot: Any) -> bool:
     return bot_kind_is_grok_build(bot) or bot_kind_is_teela(bot)
 
 
+def bot_kind_has_robot_simulator(bot: Any) -> bool:
+    """Robot Simulator + body control. Teela Brain only (one per host)."""
+    return not bot_kind_is_grok_build(bot)
+
+
 def occupies_teela_brain_slot(bot: Any) -> bool:
     """True for the unique body/robot owner on this host.
 
@@ -18673,6 +18678,8 @@ class Handler(BaseHTTPRequestHandler):
                 bot = bots.get(bid)
                 if not bot:
                     return self._json(404, {"error": "not found"})
+                if bot_kind_is_grok_build(bot):
+                    return self._json(403, {"error": "Grok Build bots do not have the Robot Simulator"})
                 skill = str(body.get("skill") or "").strip()
                 params = {
                     k: v
@@ -18798,6 +18805,8 @@ class Handler(BaseHTTPRequestHandler):
                 elif action == "stop_app":
                     result.update(bot.stop_dev_process()); bot.surface="dev"; ev={"type":"desktop.action","bot_id":bid,"action":"open_app","app":"dev"}
                 elif action == "robot":
+                    if bot_kind_is_grok_build(bot):
+                        return self._json(403, {"error": "Grok Build bots do not have the Robot Simulator"})
                     body = fill_robot_action_from_intent(bot, body)
                     cmd = str(body.get("cmd") or "")
                     if getattr(bot, "_motor_hold", False) and cmd not in {"status", "state", "live", "telemetry", ""}:

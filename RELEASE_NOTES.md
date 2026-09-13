@@ -29,6 +29,10 @@ Host MCP servers from `~/.grok/config.toml` (Chrome DevTools) are now inherited 
 - **Grok Build** bots get them in the child `GROK_HOME` config and on every ACP `session/new`, including bots created later.
 - **Teela Brain** gets them on the ACP fallback session only. The MiniOS llama.cpp body/desktop loop is unchanged and still uses `bot_browser` / desktop tools.
 
+## Robot Simulator is Teela-only
+
+Grok Build bots do not load the Robot Simulator and cannot drive the body (`403` on `robot` / virtual-body actions). Their MiniOS dock shows App Preview instead. Teela Brain still gets the simulator, and there is still only one Teela Brain per host.
+
 ## Chat UI: todos, progress, effort, and paste
 
 - Todo lists and a live progress line render in chat; Grok Build shows a reasoning-effort chip.

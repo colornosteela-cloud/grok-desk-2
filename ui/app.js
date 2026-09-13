@@ -2541,7 +2541,6 @@ async function restoreSelectedBot() {
 async function selectBot(id) {
   if (!id || String(id).startsWith("peer:")) return;
   state.selected = id;
-  connectVirtualBodyWs(id);
   try { localStorage.setItem("grok-desk-selected-bot", id); } catch { /* ignore */ }
   if (window.DeskUI?.setMobileView) DeskUI.setMobileView("chat");
   else if (mqDrawer()) setHallwayOpen(false);
@@ -2573,7 +2572,13 @@ async function selectBot(id) {
       }
     }
   }
-  if (observerBotId && id === observerBotId) state.surface = b.surface || "preview";
+  syncRobotSimulatorForBot(b);
+  if (botHasRobotSimulator(b)) connectVirtualBodyWs(id);
+  else {
+    try { virtualBodyWs?.close(); } catch { /* ignore */ }
+    virtualBodyWs = null;
+    virtualBodyWsBid = "";
+  }
   setSurface(state.surface);
   window.DeskUI?.renderHourlyNotes();
 }
@@ -3579,6 +3584,7 @@ function sendCatrinaMesh() {
 }
 
 function loadRobotSimulator() {
+  if (!selectedBotHasRobotSimulator()) return;
   state.previewPath = "";
   const iframe = $("app-preview-frame");
   if (iframe) {
@@ -3603,6 +3609,7 @@ function leftWaveLocally() {
 async function hydrateRobotIframe() {
   const iframe = $("app-preview-frame");
   if (!iframe || !robotIframeReady()) return;
+  if (!selectedBotHasRobotSimulator()) return;
   if (observerBotId) return;
   const gen = ++hydrateGen;
   let payload = null;
@@ -3653,6 +3660,7 @@ function robotIframeReady() {
 }
 
 function postRobotCommand(msg) {
+  if (!selectedBotHasRobotSimulator()) return;
   if (!robotIframeReady()) loadRobotSimulator();
   const iframe = $("app-preview-frame");
   if (!iframe) return;
@@ -3740,6 +3748,8 @@ function virtualBodyWsUrl(bid) {
 }
 function connectVirtualBodyWs(bid) {
   if (!bid) return;
+  const bot = state.bots.find((x) => x.id === bid);
+  if (bot && !botHasRobotSimulator(bot)) return;
   if (virtualBodyWs && virtualBodyWsBid === bid && virtualBodyWs.readyState <= 1) return;
   try { virtualBodyWs?.close(); } catch { /* ignore */ }
   virtualBodyWsBid = bid;
@@ -4454,6 +4464,64 @@ let slashLevelKey = "";
 
 function botIsGrokBuild(b) {
   return (b?.kind || "") === "grok-build";
+}
+
+function botHasRobotSimulator(b) {
+  return Boolean(b) && !botIsGrokBuild(b);
+}
+window.botHasRobotSimulator = botHasRobotSimulator;
+
+function selectedBotHasRobotSimulator() {
+  return botHasRobotSimulator(state.bots.find((x) => x.id === state.selected));
+}
+
+function unloadRobotSimulator() {
+  const iframe = $("app-preview-frame");
+  if (iframe) {
+    iframe.removeAttribute("srcdoc");
+    iframe.src = "about:blank";
+  }
+  iframe?.closest(".minios-preview-window")?.classList.remove("robot-mode");
+  const win = document.querySelector('.app-window[data-window-app="preview"]');
+  const title = win?.querySelector(".window-title-left strong");
+  if (title) title.textContent = "App Preview";
+  const dock = document.querySelector('.dock-app[data-desktop-app="preview"]');
+  if (dock) {
+    dock.title = "App Preview";
+    const span = dock.querySelector("span");
+    if (span) span.textContent = "🖥";
+  }
+}
+
+function syncRobotSimulatorForBot(b) {
+  const allow = botHasRobotSimulator(b);
+  document.body.classList.toggle("minios-no-robot", !allow);
+  const win = document.querySelector('.app-window[data-window-app="preview"]');
+  const title = win?.querySelector(".window-title-left strong");
+  const dock = document.querySelector('.dock-app[data-desktop-app="preview"]');
+  if (allow) {
+    if (title) title.textContent = "Robot Simulator";
+    if (dock) {
+      dock.hidden = false;
+      dock.title = "Robot Simulator";
+      const span = dock.querySelector("span");
+      if (span) span.textContent = "🤖";
+    }
+    state.surface = "preview";
+    window.DeskUI?.showRobotOnAgentDesktop?.();
+    return;
+  }
+  if (title) title.textContent = "App Preview";
+  if (dock) {
+    dock.title = "App Preview";
+    const span = dock.querySelector("span");
+    if (span) span.textContent = "🖥";
+  }
+  if (robotIframeReady()) unloadRobotSimulator();
+  if (win && win.dataset.open === "true" && !state.previewPath) {
+    window.DeskUI?.closeWindow?.(win);
+  }
+  if (!state.previewPath) state.surface = "desktop";
 }
 
 function fieldsFromHint(hint) {
@@ -7540,8 +7608,13 @@ function connectEvents() {
     if (target) {
       await selectBot(observerBotId);
       const live = state.bots.find((b) => b.id === observerBotId) || target;
-      setSurface("preview");
-      window.DeskUI?.showRobotOnAgentDesktop?.();
+      if (botHasRobotSimulator(live)) {
+        setSurface("preview");
+        window.DeskUI?.showRobotOnAgentDesktop?.();
+      } else {
+        setSurface("desktop");
+        window.DeskUI?.openWindow?.("files");
+      }
       document.getElementById("os-boot") && (document.getElementById("os-boot").hidden = true);
       document.getElementById("os-login") && (document.getElementById("os-login").hidden = true);
       document.body.classList.add("live-desktop-entered");
