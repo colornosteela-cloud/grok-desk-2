@@ -17,6 +17,18 @@ class RobotDirectionRegressionTests(unittest.TestCase):
                 self.assertEqual(virtual_body.teela_args_from_motor(cmd, text),
                                  ("bot_desktop__robot_motion", cmd))
 
+    def test_walk_back_keeps_facing_south(self):
+        st = robot_sim.default_state()
+        out = robot_sim.apply(st, {"cmd": "walk", "direction": "back"})
+        self.assertEqual(out["walk_direction"], "back")
+        self.assertEqual(out["heading"], "south")
+        spoken = robot_sim.confirm_move(out, {"cmd": "walk", "direction": "back"}, "walk backwards")
+        self.assertIn("back", spoken.lower())
+        self.assertNotIn("north", spoken.lower())
+        feel = robot_sim.describe_body(out)
+        self.assertIn("backward", feel.lower())
+        self.assertIn("facing you", feel.lower())
+
     def test_lower_named_arm_keeps_anatomical_side(self):
         for side in ("left", "right"):
             for noun in ("arm", "hand"):

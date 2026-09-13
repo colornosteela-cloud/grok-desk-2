@@ -1204,13 +1204,33 @@ def confirm_move(
         pan = float(live.get("neck_pan") or 0)
     except (TypeError, ValueError):
         pan = 0.0
-    looking = bool(re.search(r"\b(?:look|head|face|pan)\b", text or "", re.I))
-    if looking and pan <= -12:
+    pan_cmd = None
+    try:
+        if (motor or {}).get("pan_deg") is not None:
+            pan_cmd = float(motor.get("pan_deg"))
+    except (TypeError, ValueError):
+        pan_cmd = None
+    skill = str((motor or {}).get("skill") or "").lower()
+    looking = bool(re.search(r"\b(?:look|head|face|pan)\b", text or "", re.I)) or skill == "orient_head" or pan_cmd is not None
+    pan_use = pan if pan_cmd is None else pan_cmd
+    if looking and pan_use <= -12:
         return "Looking left."
-    if looking and pan >= 12:
+    if looking and pan_use >= 12:
         return "Looking right."
+    if looking and pan_cmd is not None and abs(pan_cmd) < 12:
+        return "Looking straight ahead."
     if cmd in {"walk", "start_walk"} or motion == "walking" or pose == "walk-cycle":
         direction = str((motor or {}).get("direction") or st.get("walk_direction") or "").strip().lower()
+        if direction not in {"left", "right", "back", "backward", "backwards", "forward", "forwards"}:
+            low = (text or "").lower()
+            if re.search(r"\bleft\b|\beast\b", low):
+                direction = "left"
+            elif re.search(r"\bright\b|\bwest\b", low):
+                direction = "right"
+            elif re.search(r"\b(?:back(?:wards?)?|away(?:\s+from me)?|north)\b", low):
+                direction = "back"
+            elif re.search(r"\b(?:toward(?:s)? me|forward|forwards)\b", low):
+                direction = "forward"
         if direction in {"left", "right", "back", "backward", "backwards", "forward", "forwards"}:
             word = "back" if direction.startswith("back") else ("forward" if direction.startswith("forward") else direction)
             return f"Walking {word}."
@@ -1873,6 +1893,8 @@ def _stance_phrase(st: dict[str, Any], joints: dict[str, Any]) -> str:
     if motion == "walking" or pose == "walk-cycle":
         heading = str(st.get("heading") or heading_from_walk(st.get("walk_direction")))
         foot = _gait_foot_phrase(joints)
+        if str(st.get("walk_direction") or "") in {"back", "backward", "backwards"}:
+            return "I'm walking backward, facing you." + foot
         if heading == "south" and str(st.get("walk_direction") or "place") in {"place", "south", ""}:
             return "I'm walking in place, facing you, south." + foot
         return f"I'm walking {heading}, facing {heading}." + foot
@@ -2915,7 +2937,8 @@ def apply(state: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
         if direction not in {"left", "right", "place", "back", "south"}:
             direction = "place"
         state["walk_direction"] = direction
-        state["heading"] = heading_from_walk(direction)
+        # Reverse walk keeps facing the user (south); travel is still north.
+        state["heading"] = "south" if direction == "back" else heading_from_walk(direction)
         state["seq"] = int(state.get("seq") or 0) + 1
         return public_status(state)
 

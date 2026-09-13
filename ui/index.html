@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Ubuntu:wght@300;400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/grokbot.css?v=84" />
+  <link rel="stylesheet" href="/grokbot.css?v=89" />
   <link rel="stylesheet" href="/styles.css?v=71" />
   <link rel="stylesheet" href="/vendor/xterm.css" />
 </head>
@@ -85,10 +85,6 @@
             </div>
           </div>
           <input id="import-file" type="file" accept=".json,.jsonl,.md,.txt,.zip,application/json,application/zip,text/markdown,text/plain" hidden />
-          <button id="wm-indicator" class="wm-indicator" type="button" title="Working Memory" hidden>
-            <span class="wm-indicator-icon" aria-hidden="true">🧠</span>
-            <span id="wm-indicator-text">—</span>
-          </button>
           <button id="theme-toggle" class="icon-btn" type="button" title="Switch theme">◐</button>
           <button id="screen-open" class="icon-btn" type="button" title="Show workspace">‹</button>
         </div>
@@ -151,10 +147,10 @@
             </div>
           </div>
           <div class="runtime-stats">
-            <div class="context-stat" id="context-stat" title="Live conversation context — open Working Memory" role="button" tabindex="0">
-              <span class="stat-label">Context</span>
+            <div class="context-stat wm-indicator" id="context-stat" title="Live conversation context — open Working Memory" role="button" tabindex="0">
+              <span class="stat-dot context-dot" id="context-dot" aria-hidden="true"></span>
               <strong id="context-usage">0 / 0</strong>
-              <div class="context-meter"><span id="context-meter-fill"></span></div>
+              <span>Context</span>
             </div>
             <div class="tps-stat" title="Generation throughput">
               <span class="stat-dot"></span>
@@ -563,7 +559,7 @@
                         <button id="preview-robot" type="button" class="mini-dev-btn">Robot</button>
                         <button id="preview-browser" type="button" class="mini-dev-btn" disabled>Open in Browser</button>
                       </div>
-                      <iframe id="app-preview-frame" title="Teela Robot Body Simulator" src="/ui/robot-simulator.html?v=138" sandbox="allow-scripts allow-forms allow-modals allow-downloads"></iframe>
+                      <iframe id="app-preview-frame" title="Teela Robot Body Simulator" src="/ui/robot-simulator.html?v=140" sandbox="allow-scripts allow-forms allow-modals allow-downloads"></iframe>
                     </div>
                   </section>
 
@@ -1158,7 +1154,7 @@
     <aside id="wm-panel" class="wm-panel" role="dialog" aria-modal="true" aria-labelledby="wm-title">
       <header class="wm-head">
         <div>
-          <div class="wm-kicker">TEELA — WORKING MEMORY</div>
+          <div class="wm-kicker">🧠 TEELA — WORKING MEMORY</div>
           <h2 id="wm-title">Working Memory</h2>
           <p id="wm-head-meta" class="wm-head-meta">Context accounting: Unavailable</p>
         </div>
@@ -1191,7 +1187,7 @@
   <script src="/vendor/xterm.js"></script>
   <script src="/vendor/xterm-addon-fit.js"></script>
   <script src="/grokbot-ui.js?v=62"></script>
-  <script src="/app.js?v=192"></script>
-  <script src="/working-memory.js?v=1"></script>
+  <script src="/app.js?v=196"></script>
+  <script src="/working-memory.js?v=2"></script>
 </body>
 </html>

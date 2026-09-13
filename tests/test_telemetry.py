@@ -244,6 +244,28 @@ class BotIngestTests(unittest.TestCase):
         self.assertGreater(self.bot.tps, 0)
         self.assertEqual(self.bot.speed_source, "local_runtime")
 
+    def test_llama_timings_set_tok_s_and_survive_finish(self) -> None:
+        import deskd as d
+
+        d.apply_llama_generation_speed(
+            self.bot,
+            {
+                "usage": {"prompt_tokens": 400, "completion_tokens": 20, "total_tokens": 420},
+                "timings": {"predicted_n": 20, "predicted_ms": 250.0, "predicted_per_second": 80.0},
+            },
+            elapsed_ms=10.0,
+        )
+        self.assertEqual(self.bot.tps, 80.0)
+        self.assertEqual(self.bot.speed_source, "local_runtime")
+        self.bot.record_local_generation(
+            "Hello there, I'm Teela.",
+            {"prompt_tokens": 400, "completion_tokens": 20, "total_tokens": 420},
+            started_ms=1000.0,
+            ended_ms=2000.0,
+        )
+        self.assertEqual(self.bot.tps, 80.0)
+        self.assertEqual(self.bot.speed_source, "local_runtime")
+
     def test_canned_reply_does_not_shrink_context(self) -> None:
         self.bot.record_local_generation(
             "A longer local reply that filled the window.",

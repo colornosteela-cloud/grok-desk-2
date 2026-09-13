@@ -510,10 +510,10 @@ class TeelaExecutiveTests(unittest.TestCase):
         used = [n.split("__")[-1] for n in (getattr(bot, "_teela_tools_used", None) or [])]
         self.assertIn("web_search", used)
         self.assertIn("robot_motion", used)
-        self.assertTrue(re.search(r"body|practiced|skill|moved|desktop", (line or "").lower()))
+        self.assertTrue(re.search(r"moonwalk|sliding|walk", (line or "").lower()))
         self.assertEqual(getattr(bot, "_teela_effective_mode", ""), "mixed")
 
-    def test_moonwalk_kernel_moves_when_model_only_talks(self) -> None:
+    def test_moonwalk_kernel_does_not_move_when_model_only_talks(self) -> None:
         bot = _ExecBot()
 
         def fake_complete(_payload):
@@ -523,34 +523,13 @@ class TeelaExecutiveTests(unittest.TestCase):
                 ]
             }
 
-        def fake_http(url: str, timeout: float = 8.0):
-            return {
-                "query": {"search": [{"title": "Moonwalk", "snippet": "slide backward"}]},
-                "AbstractText": "walk forward while sliding backward",
-                "RelatedTopics": [],
-            }
-
-        with patch.object(d, "_http_json_get", side_effect=fake_http):
-            line = d.run_teela_executive_turn(
-                bot, "try to do the moonwalk", completer=fake_complete
-            )
-        self.assertTrue(bot.applied, "kernel must move the body even if the model only talks")
-        applied = list(getattr(bot, "_teela_applied_caps", []) or [])
-        self.assertTrue(applied, "composed plan capabilities must be applied")
-        last_plan = getattr(bot, "_teela_last_plan", None) or []
-        plan_caps = [str(s.get("capability")) for s in last_plan if isinstance(s, dict)]
-        self.assertEqual(applied, plan_caps)
-        used = [n.split("__")[-1] for n in (getattr(bot, "_teela_tools_used", None) or [])]
-        self.assertTrue(used)
-        self.assertTrue(re.search(r"body|practiced|skill|moved", (line or "").lower()))
-        pose = str(bot.robot_state.get("pose") or "")
-        motion = str(bot.robot_state.get("motion") or "")
-        plan = bot.robot_state.get("plan")
-        self.assertTrue(pose == "ready" or motion == "walking" or isinstance(plan, dict))
-        notes = list((bot.workspace / "Desktop").glob("learn-*.md"))
-        self.assertTrue(notes, "practice note must appear on MiniOS Desktop")
-        body_md = (bot.workspace / "BODY.md").read_text(encoding="utf-8") if (bot.workspace / "BODY.md").is_file() else ""
-        self.assertIn("practice", body_md.lower() + str(notes[0].read_text(encoding="utf-8")).lower())
+        line = d.run_teela_executive_turn(
+            bot, "try to do the moonwalk", completer=fake_complete
+        )
+        self.assertEqual(bot.applied, [])
+        self.assertFalse(getattr(bot, "_teela_applied_caps", None))
+        self.assertNotIn("moved my body", (line or "").lower())
+        self.assertIn("try that", (line or "").lower())
 
     def test_existing_capability_executes(self) -> None:
         assessment = d.assess_capability(
@@ -799,7 +778,8 @@ class TeelaExecutiveTests(unittest.TestCase):
         a = getattr(bot, "_teela_assessment", None)
         self.assertIsNotNone(a)
         self.assertEqual(a.decision, "learn")
-        self.assertTrue(bot.applied or getattr(bot, "_teela_applied_caps", None))
+        self.assertEqual(bot.applied, [])
+        self.assertFalse(getattr(bot, "_teela_applied_caps", None))
 
     def test_thats_right_validates_awaiting_attempt(self) -> None:
         from teela_cl.attempts import AttemptStore
@@ -959,6 +939,60 @@ class TeelaExecutiveTests(unittest.TestCase):
         self.assertIsNotNone(fb)
         self.assertTrue(fb.handled)
         self.assertNotIn("practiced the outcome", (line or "").lower())
+
+    def test_stop_waving_and_walk_left_is_plan_not_in_place(self) -> None:
+        bot = _ExecBot()
+        d.run_teela_executive_turn(bot, "Can you wave at me?")
+        called = {"n": 0}
+
+        def fake(_payload):
+            called["n"] += 1
+            return {"choices": [{"message": {"content": "I'll stop waving and walk left."}}]}
+
+        line = d.run_teela_executive_turn(bot, "Can you stop waving and walk left?", completer=fake)
+        self.assertGreaterEqual(called["n"], 1, "compound body requests must reach Qwen")
+        low = (line or "").lower()
+        self.assertNotIn("in place", low)
+        self.assertNotIn("south", low)
+        self.assertTrue(re.search(r"left|stop", low), line)
+        hit = d._teela_known_body_hit(bot, "Can you stop waving and walk left?")
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit[1].get("cmd"), "plan")
+        steps = hit[1].get("steps") or []
+        self.assertTrue(any(str(s.get("cmd") or "") == "stop" for s in steps), steps)
+        self.assertTrue(any(str(s.get("direction") or "") == "left" for s in steps), steps)
+        self.assertTrue(
+            any(a.get("cmd") == "plan" or str(a.get("direction") or "") == "left" for a in bot.applied),
+            bot.applied,
+        )
+
+    def test_no_i_want_walk_left_is_not_retry_wave(self) -> None:
+        bot = _ExecBot()
+        d.run_teela_executive_turn(bot, "Can you wave at me?")
+
+        def boom(_payload):
+            raise AssertionError("atomic walk-left should not wait on the model")
+
+        line = d.run_teela_executive_turn(bot, "No, I want you to walk left", completer=boom)
+        self.assertNotIn("trying that again", (line or "").lower())
+        self.assertIn("left", (line or "").lower())
+        self.assertTrue(
+            any(str(a.get("direction") or "") == "left" or a.get("cmd") == "walk" for a in bot.applied),
+            bot.applied,
+        )
+
+    def test_qwen_think_end_tag_is_stripped_from_name_reply(self) -> None:
+        bot = _ExecBot()
+
+        def fake(_payload):
+            return {"choices": [{"message": {"content": "I'm Teela! </think> I'm Teela!"}}]}
+
+        line = d.run_teela_executive_turn(bot, "What is your name?", completer=fake)
+        self.assertEqual(line, "I'm Teela!")
+        self.assertNotIn("</think>", line or "")
+        self.assertNotIn("<think>", line or "")
+        self.assertEqual(d.strip_model_think_tags("I'm Teela! </think> I'm Teela!"), "I'm Teela!")
+        self.assertEqual(d.strip_model_think_tags("<think>secret</think>\nHey."), "Hey.")
 
 
 if __name__ == "__main__":

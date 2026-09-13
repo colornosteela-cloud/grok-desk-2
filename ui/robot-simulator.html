@@ -705,7 +705,7 @@ button{
 <div class="app">
   <aside class="sidebar">
     <div class="sidehead">
-      <h1>TEELA — Calibrate, Lock & Natural Walk</h1>
+      <h1>TEELA</h1>
       <div class="sub">Responsive interface: the controls and 3D view continuously adapt as the browser is resized, snapped, or opened on a phone. This version adds front, side, and back camera presets with smooth animated transitions, along with lower-back adjustment, T-pose, your approved right-arm wave, single-leg-out control, and a ground-support pose.</div>
     </div>
 
@@ -817,10 +817,10 @@ button{
               <button class="motionCtl" id="walkLeft" type="button" disabled>← Walk Left · East</button>
               <button class="motionCtl" id="walkRight" type="button" disabled>Walk Right · West →</button>
               <button class="motionCtl" id="walkPlace" type="button" disabled>In Place · South</button>
-              <button class="motionCtl" id="walkBack" type="button" disabled>Walk Back · North</button>
+              <button class="motionCtl" id="walkBack" type="button" disabled>Walk Back · Reverse</button>
               <button class="motionCtl" id="stopMotion" type="button" disabled>Stop</button>
             </div>
-            <div class="hint" style="margin-top:6px">Facing you is <strong>south</strong>. Walk left is <strong>east</strong>, walk right is <strong>west</strong>, walk back is <strong>north</strong>.</div>
+            <div class="hint" style="margin-top:6px">Facing you is <strong>south</strong>. Walk left is <strong>east</strong>, walk right is <strong>west</strong>, walk back is <strong>reverse while still facing you</strong>.</div>
             <div class="row" style="margin-top:6px">
               <button class="motionCtl" id="neutralAction" type="button" disabled>Return to Locked Pose</button>
             </div>
@@ -1742,16 +1742,23 @@ function headingOf(dir){
   if(d === "back") return "north";
   return "south";
 }
+function faceHeadingOf(dir){
+  // Reverse walk stays facing the user (south). Travel heading is still north.
+  if(normalizeWalkDir(dir) === "back") return "south";
+  return headingOf(dir);
+}
 function currentHeading(){
   if(state.motion === "walking" || reverseStage){
-    return headingOf(pendingWalkDir || state.walkDir || "place");
+    return faceHeadingOf(pendingWalkDir || state.walkDir || "place");
   }
   return state.heading || "south";
 }
 function desiredFaceYaw(dir){
   // Body frame, same as "raise your left hand". Facing you (camera on +Z) is
   // south. Her left is +X / east / +π/2; her right is -X / west / -π/2;
-  // behind her is north (π).
+  // behind her is north (π). Walk back keeps facing south (yaw 0) and
+  // travels north with a reverse gait instead of a 180° turn.
+  if(normalizeWalkDir(dir) === "back") return 0;
   const h = headingOf(dir);
   if(h === "east") return Math.PI / 2;
   if(h === "west") return -Math.PI / 2;
@@ -1821,8 +1828,8 @@ function beginWalk(dir){
   state.pose = "walk-cycle";
   if(walkTimer){ clearInterval(walkTimer); walkTimer = null; }
   walkTimer = 1;
-  state.heading = headingOf(dir);
-  log(dir === "place" ? "walk in place, facing south" : ("walk "+headingOf(dir)+" ("+dir+")"));
+  state.heading = faceHeadingOf(dir);
+  log(dir === "place" ? "walk in place, facing south" : (dir === "back" ? "walk backward, facing south" : ("walk "+headingOf(dir)+" ("+dir+")")));
   syncWalkButtons();
   emit();
 }
@@ -2597,7 +2604,7 @@ function syncHud(){
   if($("facingState")) $("facingState").textContent = currentHeading();
   if($("direction")){
     const intent = pendingWalkDir || ((state.motion==="walking" || reverseStage) ? state.walkDir : null);
-    $("direction").textContent = intent ? headingOf(intent)+(reverseStage ? " · turn" : "") : "—";
+    $("direction").textContent = intent ? (normalizeWalkDir(intent)==="back" ? "south · reverse" : headingOf(intent))+(reverseStage ? " · turn" : "") : "—";
   }
   const needle = $("compassNeedle");
   if(needle){
@@ -3462,7 +3469,7 @@ function applyWalkFrame(dt, pose, blend){
   const strideScale = stridePct / 100;
   const armScale = armSwingPct / 100;
   const swayScale = swayPct / 100;
-  if(state.motion === "walking") gaitPhase += dt * 5.1 * walkSpeed;
+  if(state.motion === "walking") gaitPhase += dt * 5.1 * walkSpeed * (state.walkDir === "back" ? -1 : 1);
   const cycle = (((gaitPhase / (Math.PI * 2)) % 1) + 1) % 1;
   const left = humanLegCycle(cycle, strideScale, blend);
   const right = humanLegCycle((cycle + 0.5) % 1, strideScale, blend);

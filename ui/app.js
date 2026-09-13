@@ -223,10 +223,26 @@ function chatterboxTagName(raw) {
   return CHATTERBOX_TAG_ALIASES[key] || key;
 }
 
+function stripThinkTags(text) {
+  let out = String(text ?? "");
+  if (!/<\/?think\b/i.test(out)) return out;
+  out = out
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, " ")
+    .replace(/<\/?think\b[^>]*>/gi, " ")
+    .replace(/[ \t]+/g, " ");
+  const parts = out.split(/(?<=[.!?])\s+/).map((p) => p.trim()).filter(Boolean);
+  const collapsed = [];
+  for (const part of parts) {
+    if (collapsed.length && collapsed[collapsed.length - 1].toLowerCase() === part.toLowerCase()) continue;
+    collapsed.push(part);
+  }
+  return collapsed.length ? collapsed.join(" ") : out;
+}
+
 function stripChatterboxTags(text) {
   // Do not trim() — stream merge calls this after every chunk, and eating a
   // trailing "\n\n" before the next "- Host" line flattened TUI markdown.
-  return String(text ?? "")
+  return stripThinkTags(String(text ?? ""))
     .replace(/\[([^\[\]]+)\]/g, (m, inner) => (CHATTERBOX_TURBO_TAGS.has(chatterboxTagName(inner)) ? "" : m))
     .replace(/ {2,}/g, " ");
 }
@@ -1919,11 +1935,13 @@ function renderMeta(b) {
     usage.title = `${used} / ${max} (${pct.toFixed(2)}%) · ${b.context_source || "unknown"}`;
   }
   const ctxStat = document.querySelector(".context-stat");
-  if (ctxStat) ctxStat.title = `Context ${used} / ${max} (${pct.toFixed(2)}%) · ${b.context_source || "unknown"}`;
-  const fill = $("context-meter-fill");
-  if (fill) {
-    fill.style.width = `${pct}%`;
-    fill.style.background = pct >= 90 ? "#ef4444" : pct >= 75 ? "#f59e0b" : "var(--accent)";
+  if (ctxStat) {
+    ctxStat.title = `Context ${used} / ${max} (${pct.toFixed(2)}%) · ${b.context_source || "unknown"}`;
+    const pressure = window.WorkingMemory && typeof window.WorkingMemory.pressureFromUtilization === "function"
+      ? window.WorkingMemory.pressureFromUtilization(max > 0 ? used / max : null)
+      : (pct >= 90 ? "CRITICAL" : pct >= 80 ? "RED" : pct >= 65 ? "ORANGE" : pct >= 45 ? "YELLOW" : "GREEN");
+    if (pressure) ctxStat.setAttribute("data-pressure", pressure);
+    else ctxStat.removeAttribute("data-pressure");
   }
   if ($("grok-tui-model")) $("grok-tui-model").textContent = modelLabel(b);
   const tuiCtx = $("grok-tui-context");
@@ -3395,7 +3413,7 @@ function wireNotepad() {
 
 window.deskOpenNotepad = openNotepadFile;
 
-const ROBOT_SIMULATOR_SRC = "/ui/robot-simulator.html?v=138";
+const ROBOT_SIMULATOR_SRC = "/ui/robot-simulator.html?v=140";
 
 let catrinaMeshBuf = null;
 let catrinaMeshPromise = null;
@@ -4996,11 +5014,20 @@ function chunkSpeech(text) {
   return out.length ? out : [String(text || "")];
 }
 
+function lastUserTextForTts() {
+  const bot = (state.bots || []).find((b) => b.id === (voice.botId || state.selected));
+  const msgs = bot?.messages || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i]?.role === "user") return String(msgs[i].text || msgs[i].content || "");
+  }
+  return "";
+}
+
 async function fetchTtsBuffer(text) {
   const r = await fetch("/v1/tts", {
     method: "POST",
     headers: headers({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, user_text: lastUserTextForTts() }),
   });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "tts failed");
   return r.arrayBuffer();

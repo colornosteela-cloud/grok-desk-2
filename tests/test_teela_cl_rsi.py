@@ -715,6 +715,8 @@ class FeedbackCorrectionTests(unittest.TestCase):
         for req in (
             "Can you stop and walk right?",
             "Can you stop and walk left?",
+            "Can you stop waving and walk left?",
+            "No, I want you to walk left",
             "walk right",
             "Can you wave?",
         ):

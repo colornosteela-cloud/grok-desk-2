@@ -52,6 +52,38 @@ class GoalInterpreter(Protocol):
     ) -> InterpretedIntent: ...
 
 
+def _affiliative_comment(request: str) -> bool:
+    """Backchannel / evaluation of what Teela just said — not a body request."""
+    t = _norm(request)
+    if not t:
+        return False
+    if re.match(r"^(?:that|this|it) (?:sounds|looks|seems|feels)\b", t):
+        return True
+    if re.match(r"^(?:sounds|looks|seems|feels) (?:nice|good|great|fine|fun|cool|lovely|ok|okay)\b", t):
+        return True
+    if re.match(
+        r"^(?:pretty |really |so |very |thats |that s )?(?:nice|cool|good|great|awesome|lovely|interesting|okay|ok|alright|wonderful)$",
+        t,
+    ):
+        return True
+    if t in {
+        "got it",
+        "makes sense",
+        "good to hear",
+        "glad to hear",
+        "fair enough",
+        "no worries",
+        "sounds good",
+        "sounds great",
+        "sounds fun",
+        "thats nice",
+        "that s nice",
+        "nice one",
+    }:
+        return True
+    return False
+
+
 def _talk(request: str) -> bool:
     t = _norm(request)
     if not t:
@@ -59,6 +91,8 @@ def _talk(request: str) -> bool:
     if t in {"hi", "hello", "hey", "thanks", "thank you", "good morning", "good night"}:
         return True
     if t.startswith("how are you") or t.startswith("what model"):
+        return True
+    if _affiliative_comment(request):
         return True
     # Classify the requested output before looking for capability words in it.
     # Politeness does not turn a request for speech into a body request.
@@ -97,6 +131,9 @@ _STATE_COMMENT_PREFIX = (
     "i see you",
     "that is",
     "that's",
+    "that sounds",
+    "this sounds",
+    "it sounds",
     "i noticed",
     "looks like you",
 )
@@ -193,7 +230,13 @@ def record_backed_interpreter(
             confidence=0.8,
         )
     vis = _tokens("see look observe camera vision scene")
-    if "?" in text and (_tokens(text) & vis):
+    _head_motion = re.search(
+        r"\b(?:look|turn|face|pan|tilt)\b.{0,28}\b(?:left|right|up|down|straight|ahead|at me)\b|"
+        r"\bhead\b.{0,16}\b(?:left|right|up|down)\b",
+        text,
+        re.I,
+    )
+    if "?" in text and (_tokens(text) & vis) and not _head_motion:
         return InterpretedIntent(
             goal="observe_scene",
             required_capabilities=[],

@@ -740,6 +740,8 @@ class BotKindTests(unittest.TestCase):
         self.assertIn("early twenties", d._TEELA_MINIOS_SYS)
         self.assertIn("[happy]", d.CHATTERBOX_VOICE_NOTE)
         self.assertIn("[chuckle]", d.CHATTERBOX_VOICE_NOTE)
+        self.assertIn("only if they told a joke", d.CHATTERBOX_VOICE_NOTE)
+        self.assertNotIn("Prefer [happy] and [chuckle]", d.CHATTERBOX_VOICE_NOTE)
         self.assertIn("not your mind", d.CHATTERBOX_VOICE_NOTE.lower())
         self.assertIn("not your model", d.CHATTERBOX_VOICE_NOTE.lower())
         self.assertNotIn("Jade is Chatterbox-Turbo.", d.CHATTERBOX_VOICE_NOTE)
@@ -747,7 +749,14 @@ class BotKindTests(unittest.TestCase):
         self.assertIn("twenty-seven billion", d._TEELA_MINIOS_SYS.lower())
         self.assertIn("not 3b", d._TEELA_MINIOS_SYS.lower().replace("3.8b", "x"))
         self.assertIn("not 3B", d._TEELA_MINIOS_SYS)
-        self.assertEqual(d.sanitize_chatterbox_text("[happy] Hi [laughs] there [nope]"), "[happy] Hi [laugh] there")
+        self.assertEqual(d.sanitize_chatterbox_text("[happy] Hi [laughs] there [nope]"), "[happy] Hi there")
+        self.assertEqual(
+            d.sanitize_chatterbox_text("[laugh] That's a good one", "tell me a joke"),
+            "[laugh] That's a good one",
+        )
+        self.assertEqual(d.filter_unwarranted_laughs("[laugh] Hello there.", "How are you?"), "Hello there.")
+        self.assertEqual(d.filter_unwarranted_laughs("[chuckle] Hi.", "hi"), "Hi.")
+        self.assertIn("[laugh]", d.filter_unwarranted_laughs("[laugh] Nice one.", "that was hilarious"))
         self.assertEqual(d.strip_chatterbox_tags("[happy] Hi [chuckle] there"), "Hi there")
         self.assertIn("happy", d.CHATTERBOX_TURBO_TAGS)
         self.assertIn("clear throat", d.CHATTERBOX_TURBO_TAGS)

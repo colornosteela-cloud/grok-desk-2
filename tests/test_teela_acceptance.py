@@ -77,12 +77,49 @@ class ConversationGates(unittest.TestCase):
                 self.assertEqual(p.reasoning_mode, "fast")
                 self.assertFalse(p.needs_learning)
 
+    def test_affiliative_comments_are_talk_not_performance(self):
+        for text in (
+            "That sounds nice.",
+            "That sounds nice",
+            "sounds nice",
+            "Nice.",
+            "Okay.",
+            "sounds good",
+            "got it",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(is_performance_request(text), text)
+                a = assess_capability(text)
+                self.assertNotEqual(getattr(a, "domain", ""), "embodied")
+                self.assertNotIn(a.decision, {"learn", "compose", "practice"})
+
     def test_greeting_executive_does_not_move(self):
         tmp = tempfile.mkdtemp()
         bot = _Bot(tmp)
         line = _talk(bot, "Hi Teela.", "Hey!")
         self.assertEqual(bot.applied, [])
         self.assertIn("hey", (line or "").lower())
+
+    def test_look_left_after_wave_is_not_waving(self):
+        tmp = tempfile.mkdtemp()
+        bot = _Bot(tmp)
+        _talk(bot, "wave at me", "Waving.")
+        line = _talk(bot, "Can you look left?", "I will look left now.")
+        low = (line or "").lower()
+        self.assertNotIn("waving", low)
+        self.assertIn("left", low)
+        st = virtual_body.overlay(bot.id, bot.robot_state)
+        pan = float((st.get("live") or st.get("joints") or {}).get("neck_pan") or 0)
+        self.assertLessEqual(pan, -12)
+
+    def test_that_sounds_nice_executive_does_not_move(self):
+        tmp = tempfile.mkdtemp()
+        bot = _Bot(tmp)
+        line = _talk(bot, "That sounds nice.", "Glad you think so.")
+        self.assertEqual(bot.applied, [])
+        self.assertNotIn("moved my body", (line or "").lower())
+        self.assertNotIn("attempt the outcome", (line or "").lower())
+        self.assertIn("glad", (line or "").lower())
 
 
 class SkillParaphraseGates(unittest.TestCase):

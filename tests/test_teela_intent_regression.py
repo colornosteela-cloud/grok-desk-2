@@ -18,6 +18,7 @@ class ConversationIntentRegressionTests(unittest.TestCase):
             "Please explain how you walk", "Tell me about your balance",
             "Would you describe a wave?", "Can you say hello?",
             "What is a wave?", "How do you walk", "You are doing a wave",
+            "That sounds nice.", "Nice.", "Okay.",
         ):
             with self.subTest(request=request):
                 self.assertFalse(is_performance_request(request))

@@ -320,11 +320,21 @@ def strip_internal_labels(text: str | None) -> str | None:
         return text
     import re
 
+    out = re.sub(r"<think\b[^>]*>.*?</think>", " ", text, flags=re.I | re.S)
+    out = re.sub(r"</?think\b[^>]*>", " ", out, flags=re.I)
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", out) if p.strip()]
+    collapsed: list[str] = []
+    for part in parts:
+        if collapsed and part.lower() == collapsed[-1].lower():
+            continue
+        collapsed.append(part)
+    if collapsed:
+        out = " ".join(collapsed)
     out = re.sub(
         r"\b(?:COMPOSE|EXECUTE|LEARNING(?:\s+LOOP)?|LEARN|RESEARCH|RSI|"
         r"capability\s+confidence|planning\s+loop)\b",
         "",
-        text,
+        out,
         flags=re.I,
     )
     out = re.sub(r"\bconfidence\s*[:=]?\s*0\.\d+\b", "", out, flags=re.I)

@@ -114,6 +114,18 @@ class SimCognitionLoopTests(unittest.TestCase):
         self.assertIn("left", (line or "").lower())
         self.assertNotIn("east", (line or "").lower())
 
+    def test_walk_backwards_faces_user_and_says_back(self):
+        bot = _Bot(tempfile.mkdtemp())
+        line = _talk(bot, "Walk backwards", "Okay.")
+        st = _feel(bot)
+        self.assertIn(st.get("motion"), {"walking", "walk"})
+        self.assertEqual(st.get("walk_direction") or bot.robot_state.get("walk_direction"), "back")
+        self.assertEqual(st.get("heading") or bot.robot_state.get("heading"), "south")
+        low = (line or "").lower()
+        self.assertIn("back", low)
+        self.assertNotIn("north", low)
+        self.assertNotIn("180", low)
+
     def test_left_hand_wave_is_left_hold_and_confirmed(self):
         bot = _Bot(tempfile.mkdtemp())
         line = _talk(bot, "Wave with your left hand", "Okay.")

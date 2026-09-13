@@ -110,10 +110,11 @@ def _feedback_score(message: str, goal: str) -> float:
         return 0.0
     if g == r:
         return 1.0
+    if len(_tokens(g)) < 2:
+        # "no" / "nah" must be the whole utterance, not a prefix of a new request.
+        return 1.0 if _tokens(r) == _tokens(g) else 0.0
     if re.search(rf"(?:^| ){re.escape(g)}(?:$| )", r):
         return 1.0
-    if len(_tokens(g)) < 2:
-        return 0.0
     return phrase_score(message, goal)
 
 
@@ -186,9 +187,6 @@ def _is_new_action_request(message: str) -> bool:
         return False
     if _is_manner_correction(t):
         return False
-    kind, score = _best_exemplar(t)
-    if kind != FeedbackType.NONE.value and score >= 0.85:
-        return False
     if t.startswith("can you") or t.startswith("could you") or t.startswith("please "):
         return True
     try:
@@ -198,6 +196,9 @@ def _is_new_action_request(message: str) -> bool:
             return True
     except Exception:
         pass
+    kind, score = _best_exemplar(t)
+    if kind != FeedbackType.NONE.value and score >= 0.85:
+        return False
     try:
         import virtual_body
 
@@ -250,6 +251,14 @@ def interpret_feedback(
 ) -> UserFeedback:
     if interpreter is not None:
         return interpreter(message, attempt, self_model)
+    if _is_new_action_request(message):
+        return UserFeedback(
+            feedback_type=FeedbackType.NONE.value,
+            target_goal_id="",
+            target_attempt_id=None,
+            user_message=message,
+            confidence=0.0,
+        )
     kind, score = _best_exemplar(message)
     if (
         kind == FeedbackType.NONE.value

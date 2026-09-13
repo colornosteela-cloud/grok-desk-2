@@ -423,11 +423,21 @@ CHATTERBOX_VOICE_NOTE = (
     "You think with the selected language model. Never say you run on, are, or were trained as "
     "Chatterbox, Jade, or Turbo. "
     "You may insert official square-bracket tags for Jade only. "
-    "At most one style tag at the start of the spoken reply: "
+    "Most replies have no tags. Do not laugh, chuckle, or start with [happy] on ordinary chat "
+    "(greetings, thanks, how are you, look/walk/wave, facts). "
+    "At most one style tag at the start, and only when the feeling is real: "
     "[happy] [surprised] [sarcastic] [dramatic] [whispering] [crying] [angry] [fear] [narration] [advertisement]. "
-    "Sounds, sparingly, in the sentence: [laugh] [chuckle] [gasp] [sigh] [cough] [groan] [sniff] [shush] [clear throat]. "
-    "Prefer [happy] and [chuckle]. Never invent tags. Never speak the brackets as words.\n"
+    "Sounds only when the moment needs them: [laugh] [chuckle] [gasp] [sigh] [cough] [groan] [sniff] [shush] [clear throat]. "
+    "[laugh] or [chuckle] only if they told a joke, asked you to laugh, or the line is clearly funny. "
+    "Never invent tags. Never speak the brackets as words.\n"
 )
+_HUMOR_CUE_RE = re.compile(
+    r"\b(?:joke|jokes|funny|hilarious|lol|lmao|rofl|haha|hehe|pun|kidding|teasing)\b|"
+    r"😄|😂|🤣|😆",
+    re.I,
+)
+_ASK_LAUGH_RE = re.compile(r"\b(?:laugh|chuckle|giggle)\b", re.I)
+_LAUGH_TAGS = frozenset({"laugh", "chuckle"})
 VOICE_ON_NOTE = (
     f"{VOICE_NOTE_MARK} ON] Your reply will be spoken aloud in Jade, your voice. "
     "Short conversational sentences, no markdown, no code blocks, no lists, no URLs. "
@@ -461,7 +471,35 @@ def normalize_chatterbox_tag(raw: str) -> str:
     return CHATTERBOX_TAG_ALIASES.get(key, key)
 
 
-def sanitize_chatterbox_text(text: str) -> str:
+def humor_warrants_laugh(user_text: str) -> bool:
+    t = visible_user_text(user_text or "")
+    if not t.strip():
+        return False
+    if _HUMOR_CUE_RE.search(t):
+        return True
+    if re.search(r"\btell me (?:a )?joke\b", t, re.I):
+        return True
+    if _ASK_LAUGH_RE.search(t) and re.search(r"\b(?:please|can you|could you|go ahead)\b", t, re.I):
+        return True
+    return False
+
+
+def filter_unwarranted_laughs(text: str, user_text: str = "") -> str:
+    """Drop [laugh]/[chuckle] unless the user's line actually calls for it."""
+    if humor_warrants_laugh(user_text):
+        return text or ""
+
+    def repl(m: re.Match[str]) -> str:
+        name = normalize_chatterbox_tag(m.group(1))
+        if name in _LAUGH_TAGS:
+            return ""
+        return m.group(0)
+
+    out = _CHATTERBOX_TAG_RE.sub(repl, text or "")
+    return re.sub(r" {2,}", " ", out).strip()
+
+
+def sanitize_chatterbox_text(text: str, user_text: str = "") -> str:
     """Keep official Turbo tags; drop unknown [brackets] so they are not read aloud."""
 
     def repl(m: re.Match[str]) -> str:
@@ -471,7 +509,73 @@ def sanitize_chatterbox_text(text: str) -> str:
         return ""
 
     out = _CHATTERBOX_TAG_RE.sub(repl, text or "")
-    return re.sub(r" {2,}", " ", out).strip()
+    out = re.sub(r" {2,}", " ", out).strip()
+    return filter_unwarranted_laughs(out, user_text)
+
+
+_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think>", re.I | re.S)
+_THINK_TAG_RE = re.compile(r"</?think\b[^>]*>", re.I)
+
+
+def strip_model_think_tags(text: str) -> str:
+    """Drop Qwen <think> blocks and stray </think> so they never reach chat/TTS."""
+    out = _THINK_BLOCK_RE.sub(" ", text or "")
+    out = _THINK_TAG_RE.sub(" ", out)
+    out = re.sub(r"[ \t]+", " ", out)
+    out = re.sub(r" *\n *", "\n", out).strip()
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", out) if p.strip()]
+    collapsed: list[str] = []
+    for part in parts:
+        if collapsed and part.lower() == collapsed[-1].lower():
+            continue
+        collapsed.append(part)
+    return " ".join(collapsed) if collapsed else out
+
+
+def apply_llama_generation_speed(bot: Any, payload: dict[str, Any] | None, elapsed_ms: float) -> None:
+    """Set tok/s from llama.cpp usage/timings or completion_tokens / wall time."""
+    if bot is None or not isinstance(payload, dict):
+        return
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    timings = payload.get("timings") if isinstance(payload.get("timings"), dict) else {}
+    if not timings and isinstance(usage.get("timings"), dict):
+        timings = usage.get("timings") or {}
+
+    def _set_rate(rate: float) -> bool:
+        if rate <= 0 or rate != rate or rate == float("inf"):  # noqa: PLR0124
+            return False
+        bot.tps = rate
+        bot.speed_source = "local_runtime"
+        bot.token_source = "local_runtime"
+        emit_fn = getattr(bot, "_emit_usage", None)
+        if callable(emit_fn):
+            try:
+                emit_fn()
+            except Exception:
+                pass
+        return True
+
+    for src in (timings, usage):
+        for key in ("predicted_per_second", "tokens_per_second", "completion_tokens_per_second"):
+            try:
+                rate = float(src.get(key))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if _set_rate(rate):
+                return
+    try:
+        n_pred = int(timings.get("predicted_n") or 0)
+        ms_pred = float(timings.get("predicted_ms") or 0)
+    except (TypeError, ValueError, AttributeError):
+        n_pred, ms_pred = 0, 0.0
+    if n_pred > 0 and ms_pred >= 80 and _set_rate(float(n_pred) / (ms_pred / 1000.0)):
+        return
+    try:
+        ct = int(usage.get("completion_tokens") or 0)
+    except (TypeError, ValueError, AttributeError):
+        ct = 0
+    if ct > 0 and elapsed_ms >= 80:
+        _set_rate(float(ct) / (elapsed_ms / 1000.0))
 
 
 def strip_chatterbox_tags(text: str) -> str:
@@ -892,17 +996,15 @@ def reset_local_llm_probe() -> None:
 
 
 def _probe_one_llm(url: str, timeout: float) -> tuple[str, ...]:
+    """List model ids at url/v1/models via urllib (Connection: close)."""
     try:
-        upstream = urlsplit(url)
-        conn = HTTPConnection(upstream.hostname or "127.0.0.1", upstream.port or 8000, timeout=timeout)
-        try:
-            conn.request("GET", "/v1/models")
-            resp = conn.getresponse()
+        base = (url or "").rstrip("/")
+        req = urllib.request.Request(base + "/v1/models", method="GET")
+        req.add_header("Connection", "close")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if int(getattr(resp, "status", 200) or 200) != 200:
+                return ()
             raw = resp.read()
-        finally:
-            conn.close()
-        if resp.status != 200:
-            return ()
         data = json.loads(raw.decode() or "{}")
         found = []
         for m in data.get("data") or []:
@@ -913,7 +1015,7 @@ def _probe_one_llm(url: str, timeout: float) -> tuple[str, ...]:
         return ()
 
 
-def probe_local_llm_map(timeout: float = 0.35) -> dict[str, str]:
+def probe_local_llm_map(timeout: float = 2.0) -> dict[str, str]:
     """Served model id -> upstream base URL (8000 first, then 8001)."""
     global _LLM_PROBE_CACHE
     now = time.monotonic()
@@ -5554,11 +5656,15 @@ def execute_teela_allowed_tool(bot: Any, name: str, args: dict[str, Any] | None)
             from teela_cl.interpreter import is_performance_request as _is_act
 
             domain = str(getattr(assess_capability(turn), "domain", "") or "")
-            if (not _is_act(turn) and not robot_sim.looks_like_motor(turn)) or domain in {
-                "talk",
-                "software",
-                "perception",
-            }:
+            mapped = bool(
+                virtual_body.teela_args_from_intent(turn)
+                or robot_sim.looks_like_motor(turn)
+                or robot_sim.infer_command(turn)
+            )
+            if not mapped and (
+                (not _is_act(turn) and not robot_sim.looks_like_motor(turn))
+                or domain in {"talk", "software", "perception"}
+            ):
                 return {"ok": False, "error": "body tool is not authorized for this request"}
     return dispatch_teela_minios_tool(bot, n, args)
 
@@ -5932,6 +6038,43 @@ def teela_learn_move_on_desktop(bot: Any, intent: str) -> dict[str, Any]:
     }
 
 
+def _walk_direction_from_intent(intent: str, hinted: Any = None) -> str:
+    """Prefer the user's left/right/back over a missing or in-place default."""
+    direction = str(hinted or "").strip().lower()
+    if direction in {"left", "right", "back", "backward", "backwards", "forward", "forwards", "south", "place"}:
+        return "back" if direction.startswith("back") else ("forward" if direction.startswith("forward") else direction)
+    t = " ".join((intent or "").lower().split())
+    if re.search(r"\b(?:back(?:wards?)?|away(?:\s+from me)?|north)\b", t):
+        return "back"
+    if re.search(r"\b(?:toward(?:s)? me|forward|forwards)\b", t):
+        return "south"
+    if re.search(r"\beast\b|\bleft\b", t):
+        return "left"
+    if re.search(r"\bwest\b|\bright\b", t):
+        return "right"
+    if re.search(r"\bin place\b", t):
+        return "place"
+    return direction or "place"
+
+
+def _teela_compound_body_request(intent: str, hit: tuple[str, dict[str, Any]] | None = None) -> bool:
+    """Two or more body acts in one utterance — Qwen should orchestrate, not a single canned move."""
+    args = hit[1] if hit and isinstance(hit[1], dict) else {}
+    if str(args.get("cmd") or "") == "plan" or (
+        isinstance(args.get("steps"), list) and len(args.get("steps") or []) >= 2
+    ):
+        return True
+    t = " ".join((intent or "").lower().split())
+    if not t:
+        return False
+    if re.search(r"\b(?:and then|after that|afterwards)\b", t):
+        return True
+    if re.search(r"\b(?:stop|halt)\b.{0,48}\b(?:and|then)\b", t):
+        return True
+    acts = re.findall(r"\b(?:stop|halt|walk|wave|look|raise|sit|bow|point|nod)\b", t)
+    return bool(re.search(r"\band\b", t) and len(set(acts)) >= 2)
+
+
 def _teela_known_body_hit(bot: Any, intent: str) -> tuple[str, dict[str, Any]] | None:
     """Map a performance request onto a kernel tool. Observation/chat returns None."""
     from teela_cl.interpreter import is_performance_request
@@ -5943,12 +6086,17 @@ def _teela_known_body_hit(bot: Any, intent: str) -> tuple[str, dict[str, Any]] |
     if hit is not None:
         return hit
     cmd = robot_sim.infer_command(intent, getattr(bot, "robot_state", None))
+    if isinstance(cmd, dict) and str(cmd.get("cmd") or "") == "plan" and cmd.get("steps"):
+        args: dict[str, Any] = {"cmd": "plan", "steps": list(cmd.get("steps") or [])}
+        if cmd.get("why"):
+            args["why"] = cmd.get("why")
+        return ("bot_desktop__robot_motion", args)
     if isinstance(cmd, dict) and str(cmd.get("cmd") or "") == "pose" and cmd.get("pose"):
         return ("bot_desktop__robot_pose", {"pose": str(cmd.get("pose"))})
     if isinstance(cmd, dict) and str(cmd.get("cmd") or "") in {"walk", "start_walk"}:
         return (
             "bot_desktop__robot_motion",
-            {"cmd": "walk", "direction": cmd.get("direction") or "place"},
+            {"cmd": "walk", "direction": _walk_direction_from_intent(intent, cmd.get("direction"))},
         )
     if isinstance(cmd, dict) and str(cmd.get("cmd") or "") == "stop":
         return ("bot_desktop__teela_stop", {"skill": "stop"})
@@ -5959,7 +6107,10 @@ def _teela_known_body_hit(bot: Any, intent: str) -> tuple[str, dict[str, Any]] |
     sk = next((s for s in skills.all() if s.skill_id == assessment.matched_skills[0]), None)
     if sk is None or not sk.tool:
         return None
-    return (str(sk.tool), dict(sk.tool_args or {}))
+    args = dict(sk.tool_args or {})
+    if str(args.get("cmd") or "") in {"walk", "start_walk"}:
+        args["direction"] = _walk_direction_from_intent(intent, args.get("direction"))
+    return (str(sk.tool), args)
 
 
 def teela_ensure_known_body(bot: Any, intent: str, used: list[str]) -> dict[str, Any] | None:
@@ -6243,6 +6394,7 @@ def assemble_teela_executive_payload(
         "temperature": 0.4,
         "max_tokens": LOCAL_LLM_MOTOR_MAX_TOKENS,
         "chat_template_kwargs": {"enable_thinking": False},
+        "stop": ["</think>", "<think>"],
         "messages": messages,
         "tools": teela_capability_tool_specs(),
     }
@@ -6369,10 +6521,8 @@ def run_teela_executive_turn(
             momentum.conversation_momentum = "talk"
             momentum.user_feedback_expected = False
             save_momentum(root, momentum)
-    learned: Any = None
     assessment = assess_capability(intent or user_text)
     setattr(bot, "_teela_assessment", assessment)
-    _learn_decisions = {"learn", "compose", "practice"}
 
     want_act = _is_act(intent or user_text)
     known_hit = _teela_known_body_hit(bot, intent or user_text) if want_act else None
@@ -6381,6 +6531,7 @@ def run_teela_executive_turn(
         known_hit
         and mixed_mode not in {"parallel", "after"}
         and not looks_like_desktop_work(intent or user_text)
+        and not _teela_compound_body_request(intent or user_text, known_hit)
     ):
         name, args = known_hit
         execute_teela_allowed_tool(bot, name, args)
@@ -6417,28 +6568,8 @@ def run_teela_executive_turn(
         except Exception:
             pass
         return spoken
-    # Learn only unmatched *requests*. Commentary/greetings and already-known
-    # kernel commands must not stand+step.
-    if (
-        assessment.decision in _learn_decisions
-        and not leave_training
-        and want_act
-        and known_hit is None
-    ):
-        learned = teela_runtime_learn(bot, intent or user_text)
+    # Unmapped turns go to Qwen. Kernel does not invent stand/step.
     payload = assemble_teela_executive_payload(bot, intent or user_text, images=images, policy=policy)
-    if learned is not None:
-        summary = (
-            f"{_BODY_APPLIED_MARK} Generalized learner already ran: decision={getattr(learned, 'decision', '')} "
-            f"success={getattr(learned, 'success', False)} attempts={getattr(learned, 'attempts', 0)}. "
-            "Speak about the evidence. Do not say you are only trying. Do not claim a perfect copy."
-        )
-        msgs = payload.get("messages")
-        if isinstance(msgs, list):
-            for msg in reversed(msgs):
-                if isinstance(msg, dict) and msg.get("role") == "user":
-                    _prepend_user_text(msg, summary)
-                    break
     nrounds = 1 if policy.reasoning_mode == "fast" else (3 if policy.reasoning_mode == "normal" else _TEELA_EXEC_ROUNDS)
     line = _teela_minios_continue(
         bot,
@@ -6449,21 +6580,12 @@ def run_teela_executive_turn(
         rounds=nrounds,
     )
     used = list(getattr(bot, "_teela_tools_used", None) or [])
-    forced = None
-    if (
-        assessment.decision in _learn_decisions
-        and not leave_training
-        and want_act
-        and known_hit is None
-    ):
-        forced = teela_ensure_perform_attempt(bot, intent or user_text, used)
-    used = list(getattr(bot, "_teela_tools_used", None) or [])
     known_move = None
-    if forced is None and learned is None and want_act:
+    if want_act:
         known_move = teela_ensure_known_body(bot, intent or user_text, used)
         used = list(getattr(bot, "_teela_tools_used", None) or [])
     computer = None
-    if forced is None and learned is None and known_move is None:
+    if known_move is None:
         computer = teela_ensure_computer(bot, intent or user_text, used)
         used = list(getattr(bot, "_teela_tools_used", None) or [])
     setattr(bot, "_teela_effective_mode", teela_effective_mode(used))
@@ -6471,8 +6593,8 @@ def run_teela_executive_turn(
         {canonicalize_tool_name(n, None).split("__")[-1] for n in used} & _BODY_TOOL_SHORTS
         or getattr(bot, "_teela_applied_caps", None)
     )
-    if learned is not None or forced is not None or body_used:
-        rec = teela_record_attempt(bot, intent or user_text, learned)
+    if body_used:
+        rec = teela_record_attempt(bot, intent or user_text, None)
         if rec is not None:
             momentum.active_context = "physical_training"
             momentum.goal = intent or user_text
@@ -6480,22 +6602,19 @@ def run_teela_executive_turn(
             momentum.user_feedback_expected = True
             momentum.conversation_momentum = "physical_training"
             save_momentum(root, momentum)
-    if (learned is not None or forced is not None) and body_used:
-        spoken = "I practiced the outcome with my available capabilities and recorded the evidence."
-        if getattr(learned, "success", False) and getattr(learned, "skill", None):
-            spoken = "I practiced, the outcome changed, and I stored a reusable skill."
-        elif used:
-            spoken = "I moved my body to attempt the outcome and recorded what happened."
-        spoken = apply_response_budget(strip_internal_labels(spoken), policy) or spoken
-        try:
-            bot.record_local_generation(spoken, started_ms=time.time() * 1000.0)
-        except Exception:
-            pass
-        return spoken
     if known_move is not None:
         st = virtual_body.overlay(str(getattr(bot, "id", "") or ""), getattr(bot, "robot_state", None))
-        spoken = robot_sim.confirm_move(st, None, intent or user_text) or "Done."
+        hit = _teela_known_body_hit(bot, intent or user_text)
+        motor = dict(hit[1]) if hit else {}
+        skill = str(motor.get("skill") or motor.get("gesture") or "").lower()
+        if skill in {"wave", "greeting"}:
+            motor.setdefault("cmd", "pose")
+            motor.setdefault("pose", "wave")
+        spoken = robot_sim.confirm_move(st, motor, intent or user_text) or "Done."
         spoken = apply_response_budget(strip_internal_labels(spoken), policy) or spoken
+        # Qwen already answered this turn — keep that speech; kernel only filled the motion.
+        if line:
+            return filter_unwarranted_laughs(strip_model_think_tags(line), intent or user_text)
         try:
             bot.record_local_generation(spoken, started_ms=time.time() * 1000.0)
         except Exception:
@@ -6512,19 +6631,24 @@ def run_teela_executive_turn(
             pass
         return spoken
     line = apply_response_budget(strip_internal_labels(line), policy)
-    return line
+    return filter_unwarranted_laughs(strip_model_think_tags(line or ""), intent or user_text)
 
 
 def _teela_minios_complete(payload: dict[str, Any]) -> dict[str, Any] | None:
     live_map = probe_local_llm_map()
     if not live_map:
-        return None
-    think_id = next((x for x in live_map if not _is_fast_llm_id(x)), next(iter(live_map)))
+        # Port is up but /v1/models probe failed — still try the configured brain.
+        if not local_llm_port_open(LOCAL_LLM_UPSTREAM):
+            return None
+        think_id = LOCAL_LLM_SERVED
+        url = LOCAL_LLM_UPSTREAM + "/v1/chat/completions"
+    else:
+        think_id = next((x for x in live_map if not _is_fast_llm_id(x)), next(iter(live_map)))
+        url = (live_map.get(think_id) or LOCAL_LLM_UPSTREAM) + "/v1/chat/completions"
     payload = dict(payload)
     payload["model"] = think_id
-    url = (live_map.get(think_id) or LOCAL_LLM_UPSTREAM) + "/v1/chat/completions"
     raw = json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=raw, method="POST", headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(url, data=raw, method="POST", headers={"Content-Type": "application/json", "Connection": "close"})
     try:
         with hybrid_exclusive("think"):
             with urllib.request.urlopen(req, timeout=120) as resp:
@@ -6678,9 +6802,16 @@ def _teela_minios_continue(
     for _round in range(nrounds + 1):
         if _round == nrounds:
             payload["tool_choice"] = "none"
+        t0 = time.perf_counter()
+        started_ms = time.time() * 1000.0
         data = complete(payload)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
         if isinstance(data, dict):
+            bot._llama_started_ms = started_ms
+            apply_llama_generation_speed(bot, data, elapsed_ms)
             usage = data.get("usage")
+            if isinstance(usage, dict) and usage:
+                bot._llama_usage = usage
             ingest = getattr(bot, "ingest_usage", None)
             if isinstance(usage, dict) and usage and callable(ingest):
                 try:
@@ -6755,7 +6886,7 @@ def _teela_minios_continue(
                     }
                 )
             continue
-        line = content.replace("\r", "\n").strip()
+        line = strip_model_think_tags(content.replace("\r", "\n").strip())
         if line.startswith("```"):
             line = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", line).strip()
             line = re.sub(r"\n?```$", "", line).strip()
@@ -10922,7 +11053,10 @@ def write_child_config(
 
 def strip_assistant_padding(text: str) -> str:
     """Qwen/vLLM reasoning often leaves a blank line before the visible answer."""
-    return (text or "").lstrip("\r\n")
+    out = (text or "").lstrip("\r\n")
+    out = _THINK_BLOCK_RE.sub(" ", out)
+    out = _THINK_TAG_RE.sub(" ", out)
+    return re.sub(r"[ \t]+", " ", out)
 
 
 # Tail/head overlap shorter than this is a token delta, not a resent window.
@@ -12930,7 +13064,7 @@ class Bot:
                         continue
                     if isinstance(obj, dict) and obj.get("role"):
                         if obj.get("role") == "assistant":
-                            obj["text"] = strip_assistant_padding(obj.get("text") or "")
+                            obj["text"] = strip_model_think_tags(strip_assistant_padding(obj.get("text") or ""))
                         if not obj.get("text") and not obj.get("images") and obj.get("role") not in ("tool", "thought", "worked"):
                             continue
                         loaded.append(obj)
@@ -12949,7 +13083,7 @@ class Bot:
             for m in self.messages:
                 row = {k: v for k, v in m.items() if k != "open"}
                 if row.get("role") == "assistant":
-                    row["text"] = strip_assistant_padding(row.get("text") or "")
+                    row["text"] = strip_model_think_tags(strip_assistant_padding(row.get("text") or ""))
                 if not row.get("text") and not row.get("images") and row.get("role") not in ("tool", "thought", "worked"):
                     continue
                 lines.append(json.dumps(row, ensure_ascii=False))
@@ -14824,9 +14958,11 @@ class Bot:
             self.finish_generation(blob, None, elapsed_ms=elapsed)
             return
         if out_tok and elapsed >= 80:
-            self.tps = float(out_tok) / (elapsed / 1000.0)
-            self.speed_source = "local_runtime"
-            self.token_source = out_src or "tokenizer"
+            # Keep llama.cpp decode tok/s; wall-clock including tools would under-report.
+            if not (float(self.tps or 0) > 0 and self.speed_source == "local_runtime"):
+                self.tps = float(out_tok) / (elapsed / 1000.0)
+                self.speed_source = "local_runtime"
+                self.token_source = out_src or "tokenizer"
         self.telemetry = {
             "current_tokens": self.context_used,
             "max_tokens": self.context_window,
@@ -16934,7 +17070,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _tts_request(self) -> None:
         body = self._read_json()
-        text = sanitize_chatterbox_text(str(body.get("text") or "").strip())
+        text = sanitize_chatterbox_text(
+            str(body.get("text") or "").strip(),
+            str(body.get("user_text") or ""),
+        )
         if not text:
             return self._json(400, {"error": "text required"})
         code, raw = self._voice_upstream(
@@ -18347,6 +18486,12 @@ class Handler(BaseHTTPRequestHandler):
         self, bot: Bot, text: str, *, streamed: bool = False
     ) -> tuple[str, list[dict[str, Any]]] | None:
         """Reply without ACP. Returns the next queued turn, or None if idle."""
+        user_line = ""
+        for m in reversed(list(getattr(bot, "messages", None) or [])):
+            if m.get("role") == "user":
+                user_line = visible_user_text(str(m.get("text") or ""))
+                break
+        text = filter_unwarranted_laughs(strip_model_think_tags(text or ""), user_line)
         if streamed:
             bot.close_chunk()
             emit(
@@ -18360,9 +18505,16 @@ class Handler(BaseHTTPRequestHandler):
             bot.append_msg("assistant", text)
             emit({"type": "chat", "bot_id": bot.id, "role": "assistant", "text": text})
         try:
-            bot.record_local_generation(text or "", started_ms=time.time() * 1000.0)
+            started = getattr(bot, "_llama_started_ms", None)
+            usage = getattr(bot, "_llama_usage", None)
+            if started is not None:
+                bot.record_local_generation(text or "", usage, started_ms=float(started))
+            else:
+                bot.record_local_generation(text or "", started_ms=time.time() * 1000.0)
         except Exception:
             pass
+        bot._llama_started_ms = None
+        bot._llama_usage = None
         bot._motor_hold = False
         nxt = bot.finish_prompt_turn()
         if nxt:

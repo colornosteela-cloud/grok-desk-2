@@ -200,7 +200,7 @@ class MiniOSWorkspaceTests(unittest.TestCase):
         west = robot_sim.apply(st, {"cmd": "walk", "direction": "right"})
         self.assertEqual(west["heading"], "west")
         north = robot_sim.apply(st, {"cmd": "walk", "direction": "back"})
-        self.assertEqual(north["heading"], "north")
+        self.assertEqual(north["heading"], "south")
         self.assertEqual(north["walk_direction"], "back")
 
     def test_robot_commanded_live_delta_and_phase(self) -> None:
@@ -982,7 +982,8 @@ class MiniOSFrontendTests(unittest.TestCase):
         self.assertNotIn("openWindow", robot_branch)
         post_robot = self.app.split("function postRobotCommand", 1)[1].split("function ", 1)[0]
         self.assertNotIn("openWindow", post_robot)
-        self.assertIn("z-index:10000", self.grokbot_css)
+        dock_css = self.grokbot_css.split(".ubuntu-dock {", 1)[1].split("}", 1)[0]
+        self.assertIn("z-index:7", dock_css)
         self.assertIn("pointer-events:none;\n  z-index:10;", self.grokbot_css)
         self.assertNotIn("inset:0 !important", self.grokbot_css.split(".desktop-fullscreen-overlay .app-window.maximized-window", 1)[1].split("}", 1)[0])
         ui = (ROOT / "ui" / "grokbot-ui.js").read_text(encoding="utf-8")
@@ -999,8 +1000,8 @@ class MiniOSFrontendTests(unittest.TestCase):
         robot = (ROOT / "ui" / "robot-simulator.html").read_text(encoding="utf-8")
         self.assertIn("function command(msg)", robot)
         self.assertIn("robot-command", robot)
-        self.assertIn("robot-simulator.html?v=138", self.app)
-        self.assertIn("robot-simulator.html?v=138", self.index)
+        self.assertIn("robot-simulator.html?v=140", self.app)
+        self.assertIn("robot-simulator.html?v=140", self.index)
         self.assertIn("Hearing", robot)
         self.assertIn("micAnalyzer", robot)
         self.assertIn("micEq", robot)
@@ -1092,9 +1093,12 @@ class MiniOSFrontendTests(unittest.TestCase):
         self.assertIn("function stopWalkSmooth", robot)
         self.assertIn("function nearHeelStrike", robot)
         self.assertIn("function desiredFaceYaw", robot)
+        self.assertIn("function faceHeadingOf", robot)
+        self.assertIn('if(normalizeWalkDir(dir) === "back") return 0', robot)
         self.assertIn('if(h === "east") return Math.PI / 2', robot)
         self.assertIn('if(h === "west") return -Math.PI / 2', robot)
         self.assertIn('if(h === "north") return Math.PI', robot)
+        self.assertIn('walkDir === "back" ? -1 : 1', robot)
         self.assertIn("function headingOf", robot)
         self.assertIn('id="walkBack"', robot)
         self.assertIn('id="compass"', robot)
@@ -1182,7 +1186,8 @@ class MiniOSFrontendTests(unittest.TestCase):
         self.assertIn("request_workspace_share", mcp)
         self.assertIn("workspace-shares", self.deskd)
         robot = (ROOT / "ui" / "robot-simulator.html").read_text(encoding="utf-8")
-        self.assertIn("TEELA — Calibrate, Lock & Natural Walk", robot)
+        self.assertIn("<h1>TEELA</h1>", robot)
+        self.assertNotIn("Calibrate, Lock & Natural Walk", robot)
         self.assertIn("const RobotSim", robot)
         self.assertIn('class="app"', robot)
         self.assertNotIn('id="dock"', robot)
@@ -1380,11 +1385,11 @@ function element() {
     querySelector() { return null; }};
 }
 const elements = Object.fromEntries(['composer', 'message', 'send', 'undo',
-  'tps-counter', 'context-usage', 'context-meter-fill'].map(x => [x, element()]));
+  'tps-counter', 'context-usage', 'context-stat'].map(x => [x, element()]));
 const tpsStat = element();
 Object.assign(globalThis, {
   $: id => elements[id] || null,
-  document: {querySelector: s => s === '.tps-stat' ? tpsStat : null},
+  document: {querySelector: s => s === '.tps-stat' ? tpsStat : s === '.context-stat' ? elements['context-stat'] : null},
   window: {}, state: {selected: 'bot', bots: [{id: 'bot', messages: [], status: 'Ready'}],
     working: {}, stopped: {}, pendingImages: []},
   voiceChat: {on: false, pendingSend: ''},
@@ -1570,6 +1575,8 @@ await retry;
         self.assertIn("function unpackPackedMarkdownLists", self.app)
         chatter = self.app.split("function stripChatterboxTags", 1)[1].split("function keepChatterboxTags", 1)[0]
         self.assertNotIn(".trim()", chatter)
+        self.assertIn("function stripThinkTags", self.app)
+        self.assertIn("think\\b", self.app)
         self.assertIn('if (text && last && last.role === "assistant")', self.app)
         self.assertIn("function prettyToolOutput", self.app)
         self.assertIn("function toolCommandFromUpdate", self.app)
@@ -1752,7 +1759,7 @@ assert.equal(bot.tps, 42.125);
 assert.equal(elements['tps-counter'].textContent, '42.1');
 assert.equal(tpsStat.title, '42.13 tok/s · provider-timing · provider-usage');
 assert.equal(elements['context-usage'].textContent, '13k / 1M');
-assert.equal(elements['context-meter-fill'].style.width, '1.25%');
+assert.equal(elements['context-stat']['data-pressure'], 'GREEN');
 chunk(' more output '.repeat(1000));
 assert.equal(bot.tps, 42.125, 'character counts must not overwrite provider speed');
 assert.equal(elements['tps-counter'].textContent, '42.1');

@@ -25,6 +25,16 @@ from cluster import (  # noqa: E402
 )
 
 
+class LlmProbeTests(unittest.TestCase):
+    def test_probe_uses_urllib_not_httpconnection(self) -> None:
+        import inspect
+
+        src = inspect.getsource(d._probe_one_llm)
+        self.assertIn("urllib.request", src)
+        self.assertIn("urlopen", src)
+        self.assertNotIn("http.client", src)
+
+
 class PathTests(unittest.TestCase):
     def test_nested_bot_paths(self) -> None:
         bid = "b_abc123def456"

@@ -124,6 +124,27 @@ class ContextManagerTests(unittest.TestCase):
         self.assertEqual(snap["used_tokens"], 830)
         self.assertEqual(snap["pressure"], wm.pressure_from_utilization(830 / self.bot.context_window))
 
+    def test_executive_llama_timings_set_tok_s(self) -> None:
+        def fake_complete(_payload):
+            return {
+                "choices": [{"message": {"content": "Hello. What would you like to work on?"}}],
+                "usage": {"prompt_tokens": 812, "completion_tokens": 18, "total_tokens": 830},
+                "timings": {
+                    "predicted_n": 18,
+                    "predicted_ms": 225.0,
+                    "predicted_per_second": 80.0,
+                },
+            }
+
+        line = d.run_teela_executive_turn(self.bot, "hi", completer=fake_complete)
+        self.assertTrue(line)
+        self.assertEqual(self.bot.tps, 80.0)
+        self.assertEqual(self.bot.speed_source, "local_runtime")
+        h = d.Handler.__new__(d.Handler)
+        h._finish_fast_chat(self.bot, line)
+        self.assertEqual(self.bot.tps, 80.0)
+        self.assertEqual(self.bot.speed_source, "local_runtime")
+
     def test_leftover_momentum_goal_is_not_an_eternal_task(self) -> None:
         from teela_cl.deliberation import InteractionContext, save_momentum
 

@@ -115,25 +115,20 @@
   }
 
   function setIndicator(bot) {
-    const btn = typeof $ === "function" ? $("wm-indicator") : document.getElementById("wm-indicator");
-    const text = typeof $ === "function" ? $("wm-indicator-text") : document.getElementById("wm-indicator-text");
-    if (!btn) return;
+    const ctx = typeof $ === "function" ? $("context-stat") : document.getElementById("context-stat");
+    if (!ctx) return;
     if (!bot) {
-      btn.hidden = true;
+      ctx.removeAttribute("data-pressure");
       return;
     }
-    btn.hidden = false;
     const source = bot.context_source || "";
     const used = source ? Number(bot.context_used) : (bot.wm_used != null ? Number(bot.wm_used) : null);
     const cap = Number(bot.context_window) || null;
     const util = bot.wm_utilization != null ? Number(bot.wm_utilization) : (cap && used != null ? used / cap : null);
     const pressure = bot.wm_pressure || pressureFromUtilization(util);
     const known = source && used != null && Number.isFinite(used) && cap && Number.isFinite(cap) && cap > 0;
-    const label = known ? formatCompact(used, cap, pressure) : "🧠 Unavailable";
-    if (text) text.textContent = label.replace(/^🧠\s*/, "");
-    else btn.textContent = label;
-    btn.setAttribute("data-pressure", pressure || "");
-    btn.title = known
+    ctx.setAttribute("data-pressure", pressure || "");
+    ctx.title = known
       ? `${Number(used).toLocaleString()} / ${Number(cap).toLocaleString()} · ${((util || 0) * 100).toFixed(1)}% · ${pressure}`
       : "Context accounting: Unavailable";
   }
@@ -688,15 +683,6 @@
   }
 
   function wire() {
-    const indicator = $("wm-indicator");
-    if (indicator && !indicator.dataset.wired) {
-      indicator.dataset.wired = "true";
-      indicator.addEventListener("click", (e) => {
-        e.preventDefault();
-        if (ui.open) closeDrawer();
-        else openDrawer();
-      });
-    }
     const ctx = $("context-stat") || document.querySelector(".context-stat");
     if (ctx && !ctx.dataset.wmWired) {
       ctx.dataset.wmWired = "true";

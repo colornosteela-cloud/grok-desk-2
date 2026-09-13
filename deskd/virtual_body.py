@@ -284,7 +284,14 @@ def stamp_intended(bot_id: str, skill: str, params: dict[str, Any] | None = None
             joints["neck_pan"] = float(params.get("pan_deg") or 0)
         if params.get("tilt_deg") is not None:
             joints["neck_tilt"] = float(params.get("tilt_deg") or 0)
-        out.update({"joints": joints, "live": dict(joints)})
+        out.update({
+            "joints": joints,
+            "live": dict(joints),
+            "waving": False,
+            "motion": "idle",
+        })
+        if str(out.get("pose") or "") in {"wave", "waving"}:
+            out["pose"] = "custom"
     elif skill == "raise_arm":
         side = "left" if str(params.get("side") or "right").lower() == "left" else "right"
         cur = float(joints.get(f"{side}_shoulder") or 0)
