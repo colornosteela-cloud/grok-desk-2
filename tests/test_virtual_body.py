@@ -505,6 +505,52 @@ class VirtualBodyToolTests(unittest.TestCase):
         self.assertIn("Wave: not waving.", sense)
         self.assertNotIn("Wave: yes —", sense)
 
+    def test_html_wave_cannot_clobber_minios_walk_on_robot(self) -> None:
+        st = {
+            "pose": "walk-cycle",
+            "motion": "walking",
+            "waving": False,
+            "walk_direction": "left",
+            "heading": "east",
+            "joints": dict(robot_sim.POSES["home"]),
+        }
+        virt = {
+            "pose": "wave",
+            "motion": "waving",
+            "waving": True,
+            "joints": dict(robot_sim.POSES["wave"]),
+        }
+        out = virtual_body.apply_to_robot(st, virt)
+        self.assertEqual(out.get("pose"), "walk-cycle")
+        self.assertEqual(out.get("motion"), "walking")
+        self.assertFalse(out.get("waving"))
+        self.assertEqual(out.get("walk_direction"), "left")
+
+    def test_minios_walk_overlay_beats_html_leftover_wave(self) -> None:
+        virtual_body.note_state(
+            "b_vb_walk_wave",
+            {
+                "mode": "virtual",
+                "pose": "wave",
+                "motion": "waving",
+                "waving": True,
+                "joints": dict(robot_sim.POSES["wave"]),
+            },
+        )
+        minios = {
+            "pose": "walk-cycle",
+            "motion": "walking",
+            "waving": False,
+            "walk_direction": "left",
+            "heading": "east",
+            "joints": dict(robot_sim.POSES["home"]),
+        }
+        st = virtual_body.overlay("b_vb_walk_wave", minios)
+        self.assertEqual(st.get("pose"), "walk-cycle")
+        self.assertEqual(st.get("motion"), "walking")
+        self.assertFalse(st.get("waving"))
+        self.assertEqual(st.get("walk_direction"), "left")
+
     def test_html_standing_overlay_beats_minios_wave(self) -> None:
         virtual_body.note_state(
             "b_vb_false_wave",
@@ -780,6 +826,26 @@ class VirtualStampPersistenceTests(unittest.TestCase):
         self.assertFalse(live.get("waving"), live)
         self.assertLess(float(joints.get("left_shoulder") or 0), 15, live)
         self.assertGreaterEqual(float(joints.get("right_shoulder") or 0), 100, live)
+
+    def test_minios_walk_updates_overlay_after_wave_stamp(self) -> None:
+        virtual_body.stamp_intended("b_stamp", "wave", {"side": "right"})
+        virtual_body.note_from_robot(
+            "b_stamp",
+            {
+                "pose": "walk-cycle",
+                "motion": "walking",
+                "waving": False,
+                "walk_direction": "left",
+                "heading": "east",
+                "joints": dict(robot_sim.POSES["home"]),
+                "live": dict(robot_sim.POSES["home"]),
+            },
+        )
+        live = virtual_body.latest_state("b_stamp")
+        self.assertEqual(live.get("pose"), "walk-cycle")
+        self.assertEqual(live.get("motion"), "walking")
+        self.assertFalse(live.get("waving"))
+        self.assertEqual(live.get("walk_direction"), "left")
 
     def test_stale_minios_live_cannot_undo_stop_stamp(self) -> None:
         virtual_body.stamp_intended("b_stamp", "raise_arm", {"side": "right"})

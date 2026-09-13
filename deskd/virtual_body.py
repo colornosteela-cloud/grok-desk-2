@@ -178,6 +178,10 @@ def apply_to_robot(robot_state: dict[str, Any] | None, virt: dict[str, Any] | No
     st["joints"] = dict(live)
     pose = str(virt.get("pose") or "").strip()
     motion = str(virt.get("motion") or "").strip()
+    rs_walk = str(st.get("motion") or "") in {"walking", "walk"} or str(st.get("pose") or "") in {"walk-cycle", "walk"}
+    html_wave = pose == "wave" or motion == "waving" or bool(virt.get("waving"))
+    if rs_walk and html_wave:
+        return st
     if pose:
         st["pose"] = pose
     if motion:
@@ -234,6 +238,21 @@ def overlay(bot_id: str, state: dict[str, Any] | None) -> dict[str, Any]:
             st[key] = virt[key]
     if "waving" in virt:
         st["waving"] = bool(virt.get("waving"))
+    rs_motion = str((state or {}).get("motion") or "")
+    rs_pose = str((state or {}).get("pose") or "")
+    html_wave = (
+        str(st.get("pose") or "") == "wave"
+        or bool(st.get("waving"))
+        or str(st.get("motion") or "") == "waving"
+    )
+    if html_wave and (rs_motion in {"walking", "walk"} or rs_pose in {"walk-cycle", "walk"}):
+        st["pose"] = rs_pose or "walk-cycle"
+        st["motion"] = "walking"
+        st["waving"] = False
+        if (state or {}).get("walk_direction"):
+            st["walk_direction"] = (state or {}).get("walk_direction")
+        if (state or {}).get("heading"):
+            st["heading"] = (state or {}).get("heading")
     return st
 
 
@@ -355,7 +374,8 @@ def note_from_robot(bot_id: str, robot_state: dict[str, Any] | None) -> dict[str
     cur = latest_state(bot_id)
     cur_stamp = float(cur.get("stamp_t") or 0)
     walking = motion in {"walking", "walk"} or pose in {"walk-cycle", "walk"}
-    if cur_stamp > 0 and (cur.get("joints") or cur.get("live")) and not walking:
+    commanded = walking or pose in {"home", "neutral", "walk-cycle"} or motion in {"walking", "stopped"}
+    if cur_stamp > 0 and (cur.get("joints") or cur.get("live")) and not commanded:
         return cur
     note_state(bot_id, body)
     return body

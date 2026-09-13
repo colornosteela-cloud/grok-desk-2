@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "deskd"))
@@ -79,6 +80,31 @@ class BodyStateAuthorityTests(unittest.TestCase):
             self.store.apply_measured({"right_shoulder": 10.0}, pose="custom")
         hist = self.store.history(limit=50)
         self.assertLessEqual(len(hist), 3)
+
+    def test_snapshot_reports_minios_walk_not_leftover_wave(self) -> None:
+        import deskd as d
+
+        self.store.apply_commanded({"right_shoulder": 24.0}, pose="wave", last_action="wave")
+        self.store.apply_measured({"right_shoulder": 24.0}, pose="wave", waving=True)
+
+        class _Bot:
+            id = "b_body"
+            root = self.tmp
+            robot_state = {
+                "pose": "walk-cycle",
+                "motion": "walking",
+                "waving": False,
+                "walk_direction": "left",
+                "heading": "east",
+                "joints": {},
+            }
+
+        with patch.object(d, "teela_body_store", return_value=self.store):
+            snap = d.teela_body_snapshot(_Bot())
+        self.assertEqual(snap.get("pose"), "walk-cycle")
+        self.assertEqual(snap.get("motion"), "walking")
+        self.assertFalse(snap.get("waving"))
+        self.assertEqual(snap.get("walk_direction"), "left")
 
     def test_ui_hydrate_reads_authoritative_body_state(self) -> None:
         app = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")

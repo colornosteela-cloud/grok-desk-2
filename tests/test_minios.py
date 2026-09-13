@@ -1000,8 +1000,10 @@ class MiniOSFrontendTests(unittest.TestCase):
         robot = (ROOT / "ui" / "robot-simulator.html").read_text(encoding="utf-8")
         self.assertIn("function command(msg)", robot)
         self.assertIn("robot-command", robot)
-        self.assertIn("robot-simulator.html?v=140", self.app)
-        self.assertIn("robot-simulator.html?v=140", self.index)
+        self.assertIn("robot-simulator.html?v=141", self.app)
+        self.assertIn("robot-simulator.html?v=141", self.index)
+        begin = robot.split("function beginWalk", 1)[1].split("function startStepTurn", 1)[0]
+        self.assertIn("stopWaving()", begin)
         self.assertIn("Hearing", robot)
         self.assertIn("micAnalyzer", robot)
         self.assertIn("micEq", robot)

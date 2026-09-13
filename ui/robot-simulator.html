@@ -1821,6 +1821,7 @@ function beginWalk(dir){
   pendingWalkDir = null;
   stopClock = 0;
   turnClock = 0;
+  stopWaving();
   state.walkDir = dir;
   if(state.motion !== "walking") gaitPhase = 0;
   walkStarted = performance.now();

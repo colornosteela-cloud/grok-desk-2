@@ -4878,6 +4878,19 @@ def teela_body_snapshot(bot: Any) -> dict[str, Any]:
                 source="simulation",
             )
             snap = store.snapshot()
+    rs = getattr(bot, "robot_state", None)
+    if isinstance(rs, dict) and (
+        str(rs.get("motion") or "") in {"walking", "walk"}
+        or str(rs.get("pose") or "") in {"walk-cycle", "walk"}
+    ):
+        snap = dict(snap)
+        snap["pose"] = str(rs.get("pose") or "walk-cycle")
+        snap["motion"] = "walking"
+        snap["waving"] = False
+        if rs.get("walk_direction"):
+            snap["walk_direction"] = rs.get("walk_direction")
+        if rs.get("heading"):
+            snap["heading"] = rs.get("heading")
     return snap
 
 
@@ -16218,7 +16231,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ssl.SSLEOFError):
             return
 
     def _json(self, code: int, obj: Any) -> None:
@@ -17595,7 +17608,7 @@ class Handler(BaseHTTPRequestHandler):
                     payload = json.dumps(ev).encode()
                     self.wfile.write(b"data: " + payload + b"\n\n")
                 self.wfile.flush()
-        except BrokenPipeError:
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ssl.SSLEOFError):
             pass
         finally:
             with lock:

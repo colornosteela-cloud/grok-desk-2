@@ -3413,7 +3413,7 @@ function wireNotepad() {
 
 window.deskOpenNotepad = openNotepadFile;
 
-const ROBOT_SIMULATOR_SRC = "/ui/robot-simulator.html?v=140";
+const ROBOT_SIMULATOR_SRC = "/ui/robot-simulator.html?v=141";
 
 let catrinaMeshBuf = null;
 let catrinaMeshPromise = null;
