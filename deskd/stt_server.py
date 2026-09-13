@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Local STT for Grok Desk: POST audio → text. Loopback-only (127.0.0.1:8091).
+"""Local STT for Grok Desk: POST audio → text.
+
+Default bind is loopback (127.0.0.1:8091). On teela-body set STT_HOST=0.0.0.0
+(see examples/systemd/teela-stt.service) so teela-brain can reach :8091 on the LAN
+while localhost clients still work.
 
 Backends (STT_BACKEND):
   whisper — faster-whisper (default: small.en)

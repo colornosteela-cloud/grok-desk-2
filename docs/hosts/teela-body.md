@@ -46,7 +46,61 @@ Optional later: CUDA vLLM on `:8000`. Existing `/v1/llm` alias/proxy on *this* d
 
 ## Voice (Jade TTS / Whisper STT)
 
-This box serves Chatterbox-Turbo (`:8090`) and faster-whisper `small.en` (`:8091`). Bind them on the LAN (or `0.0.0.0`) so teela-brain can reach them at `http://<body-lan-ip>:8090` and `:8091`. deskd on teela-brain defaults to `TEELA_TTS_URL` / `TEELA_STT_URL` (LAN `10.0.0.118`); override with those env vars if the IP changes. Do not run Whisper on teela-brain — it steals GPU0 from 27B.
+`./start.sh` does **not** start TTS or STT. Voice is separate user systemd on this box. teela-brain’s deskd then calls those ports over LAN (`TEELA_TTS_URL` / `TEELA_STT_URL`).
+
+| Service | Port | GPU | In-repo launcher |
+| --- | --- | --- | --- |
+| Jade / Chatterbox-Turbo TTS | `8090` | GPU0 | **not in this repo** — keep the existing Chatterbox process; only change bind `127.0.0.1` → `0.0.0.0` |
+| faster-whisper `small.en` STT | `8091` | GPU1 | `deskd/stt_server.py` via `examples/systemd/teela-stt.service` |
+
+Do not change ports, models, or GPU assignment. Local `127.0.0.1:8090` / `:8091` must keep working after the bind change.
+
+### STT (this repo)
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp examples/systemd/teela-stt.service ~/.config/systemd/user/
+# WorkingDirectory / ExecStart paths: adjust if the clone is not ~/grok-desk-2
+systemctl --user daemon-reload
+systemctl --user enable --now teela-stt.service
+```
+
+`STT_HOST=0.0.0.0` is set in the unit. The Python default remains loopback so a accidental run on teela-brain stays local.
+
+### TTS (existing Chatterbox on this machine)
+
+Keep the current Chatterbox unit/script. Change only the listen address:
+
+- If it reads `TTS_HOST`, set `TTS_HOST=0.0.0.0` (see `examples/systemd/teela-tts.service` as a template — replace `ExecStart=/bin/false` with the command that already works).
+- Otherwise edit the bind from `127.0.0.1` to `0.0.0.0` and leave port `8090`.
+
+Restart that unit. Do not replace the startup mechanism.
+
+### Firewall (only teela-brain)
+
+If UFW is active, allow TCP 8090/8091 from teela-brain only:
+
+```bash
+sudo ufw allow from 10.0.0.10 to any port 8090 proto tcp
+sudo ufw allow from 10.0.0.10 to any port 8091 proto tcp
+sudo ufw reload
+sudo ufw status
+```
+
+Equivalent nftables/firewalld: source `10.0.0.10`, dports `8090,8091/tcp`.
+
+### Verify on teela-body
+
+```bash
+ss -lntp | grep -E ':8090|:8091'
+# expect 0.0.0.0:8090 and 0.0.0.0:8091 — not only 127.0.0.1
+curl -sS http://127.0.0.1:8090/health
+curl -sS http://127.0.0.1:8091/health
+curl -sS -X POST http://127.0.0.1:8090/tts -H 'Content-Type: application/json' \
+  -d '{"text":"[happy] Hello, I am Teela."}' -o /tmp/teela-hello.wav
+```
+
+Local Grok Desk `{tts, stt, voice}` should stay ready. From teela-brain, `GET /v1/voice/health` should show `host: teela-body`.
 
 ## Motion / perception (not cognition)
 

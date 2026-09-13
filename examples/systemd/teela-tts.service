@@ -1,0 +1,23 @@
+[Unit]
+Description=Teela TTS (Chatterbox-Turbo / Jade) for Grok Desk
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# GPU0 — keep the existing Chatterbox model and port 8090.
+Environment=CUDA_VISIBLE_DEVICES=0
+# Body must listen on all interfaces so teela-brain can reach :8090 over LAN.
+# Localhost clients still work. If your launcher ignores TTS_HOST, change its
+# bind from 127.0.0.1 to 0.0.0.0 and leave ExecStart as it already is.
+Environment=TTS_HOST=0.0.0.0
+Environment=TTS_PORT=8090
+# Keep the ExecStart from the working Chatterbox unit on this machine.
+# Example only — replace with the path that already serves Jade:
+# ExecStart=/usr/bin/python3 %h/path/to/your/chatterbox_server.py
+ExecStart=/bin/false
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

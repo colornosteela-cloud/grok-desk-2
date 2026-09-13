@@ -1,0 +1,24 @@
+[Unit]
+Description=Teela STT (faster-whisper small.en) for Grok Desk
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# GPU1 — do not steal GPU0 from Jade TTS.
+Environment=CUDA_VISIBLE_DEVICES=1
+Environment=STT_BACKEND=whisper
+Environment=WHISPER_MODEL=small.en
+Environment=WHISPER_DEVICE=cuda
+Environment=WHISPER_COMPUTE=float16
+# Body must listen on all interfaces so teela-brain can reach :8091 over LAN.
+# Localhost clients still work (127.0.0.1:8091). Default in stt_server.py stays loopback.
+Environment=STT_HOST=0.0.0.0
+Environment=STT_PORT=8091
+WorkingDirectory=%h/grok-desk-2
+ExecStart=/usr/bin/python3 %h/grok-desk-2/deskd/stt_server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
