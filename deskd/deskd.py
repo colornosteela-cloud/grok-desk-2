@@ -12097,6 +12097,65 @@ def turn_was_cancelled(bot: Any) -> bool:
     return bool(ev is not None and ev.is_set())
 
 
+_BUSY_STATUS_RE = re.compile(
+    r"^(Thinking|Working|Speaking|Using |Reading |Starting )",
+    re.I,
+)
+
+
+def bot_has_live_llm(bid: str) -> bool:
+    with _LLM_CONN_LOCK:
+        return bool(_LLM_CONNS.get(str(bid or "") or ""))
+
+
+def reclaim_stale_busy_status(bot: Any) -> bool:
+    """Unstick Thinking/Working when the turn is gone (hung prefill, missing turn_completed)."""
+    if bot is None:
+        return False
+    st = str(getattr(bot, "status", "") or "")
+    if not _BUSY_STATUS_RE.search(st):
+        return False
+    bid = str(getattr(bot, "id", "") or "")
+    busy = bool(getattr(bot, "_prompt_busy", False))
+    prefill = getattr(bot, "_prefill_stop", None)
+    prefill_on = prefill is not None and not prefill.is_set()
+    live = bot_has_live_llm(bid)
+    acp = getattr(bot, "acp", None)
+    last = float(getattr(acp, "_last_acp_event", 0) or 0) if acp else 0.0
+    idle = (time.time() - last) if last else 1e9
+    if live:
+        return False
+    if (busy or prefill_on) and idle < 90:
+        return False
+    stop_local_prefill_progress(bot)
+    if busy:
+        try:
+            if acp is not None:
+                acp.cancel()
+        except Exception:
+            pass
+        lock = getattr(bot, "_prompt_lock", None)
+        if lock is not None:
+            with lock:
+                bot._prompt_busy = False
+        else:
+            bot._prompt_busy = False
+    bot.status = "Ready"
+    try:
+        emit(
+            {
+                "type": "status",
+                "bot_id": bid,
+                "text": "Ready",
+                "surface": getattr(bot, "surface", "") or "chat",
+                "control": getattr(bot, "control", "") or "agent_controlled",
+            }
+        )
+    except Exception:
+        pass
+    return True
+
+
 def cancelled_llm_completion(served: str = "") -> bytes:
     return json.dumps(
         {
@@ -12153,6 +12212,8 @@ def stop_local_prefill_progress(bot: Any) -> None:
     ev = getattr(bot, "_prefill_stop", None) if bot is not None else None
     if ev is not None:
         ev.set()
+    if bot is not None:
+        bot._prefill_stop = None
 
 
 def start_local_prefill_progress(bot: Any, est_tokens: int) -> None:
@@ -12172,8 +12233,9 @@ def start_local_prefill_progress(bot: Any, est_tokens: int) -> None:
 
     def tick() -> None:
         t0 = time.time()
+        deadline = t0 + 45.0
         while not stop.wait(2.0):
-            if turn_was_cancelled(bot):
+            if turn_was_cancelled(bot) or time.time() >= deadline:
                 return
             elapsed = time.time() - t0
             if n <= 0:
@@ -14892,6 +14954,7 @@ class Bot:
         idx.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     def profile(self) -> dict[str, Any]:
+        reclaim_stale_busy_status(self)
         return {
             "id": self.id,
             "name": self.name,
@@ -16578,7 +16641,8 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             if not forwarded:
                 forwarded = True
-                emit_local_activity(bot, "Thinking…")
+                stop_local_prefill_progress(bot)
+                emit_local_activity(bot, "Speaking…")
             try:
                 chunk = "data: " + json.dumps(obj, separators=(",", ":")) + "\n\n"
                 self.wfile.write(chunk.encode())
@@ -18895,6 +18959,7 @@ class Handler(BaseHTTPRequestHandler):
                     emit({"type": "chat", "bot_id": bot.id, "role": "system", "text": err})
             nxt = bot.finish_prompt_turn()
             bot._motor_hold = False
+            stop_local_prefill_progress(bot)
             if nxt:
                 text, images = nxt
                 bot.status = "Working…"

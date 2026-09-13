@@ -1016,6 +1016,27 @@ class LocalGpuModelTests(unittest.TestCase):
             d.emit_local_activity(bot, "Thinking…")
         self.assertGreater(bot.acp._last_acp_event, 0.0)
 
+    def test_reclaim_unsticks_thinking_when_turn_is_idle(self) -> None:
+        bot = types.SimpleNamespace(
+            id="b_stuck",
+            status="Thinking…",
+            surface="chat",
+            control="agent_controlled",
+            _prompt_busy=False,
+            _prefill_stop=None,
+            acp=types.SimpleNamespace(_last_acp_event=0.0),
+            _prompt_lock=threading.Lock(),
+        )
+        with patch.object(d, "emit"):
+            self.assertTrue(d.reclaim_stale_busy_status(bot))
+        self.assertEqual(bot.status, "Ready")
+        bot.status = "Thinking…"
+        bot._prompt_busy = True
+        bot.acp._last_acp_event = time.time()
+        with patch.object(d, "emit"):
+            self.assertFalse(d.reclaim_stale_busy_status(bot))
+        self.assertEqual(bot.status, "Thinking…")
+
 
 LOCAL_ONLY = {
     "qwen38-27b": CATALOG["qwen38-27b"],
