@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -179,6 +182,65 @@ class GenerationSpeedTests(unittest.TestCase):
         )
         self.assertEqual(m["generation_tok_s"], 0.0)
 
+    def test_fast_long_stream_is_not_a_burst(self) -> None:
+        # 200 tok/s over 2s of real decode is plausible; the >150 rule must only
+        # reject short dump bursts, not sustained fast streams.
+        m = t.generation_metrics(
+            output_tokens=400,
+            token_source="grok_runtime",
+            first_out_ms=1000,
+            last_out_ms=3000,
+            stream_start_ms=0,
+            turn_start_ms=0,
+        )
+        self.assertEqual(m["speed_source"], "stream_measurement")
+        self.assertAlmostEqual(m["generation_ms"], 2000.0)
+        self.assertAlmostEqual(m["generation_tok_s"], 200.0, places=1)
+
+    def test_short_dump_burst_still_falls_back(self) -> None:
+        m = t.generation_metrics(
+            output_tokens=3000,
+            token_source="grok_runtime",
+            first_out_ms=9000,
+            last_out_ms=9100,
+            stream_start_ms=0,
+            turn_start_ms=0,
+            elapsed_ms=9600,
+        )
+        # 30k tok/s over 100ms is a coalesced dump, not GPU decode.
+        self.assertEqual(m["speed_source"], "stream_measurement")
+        self.assertAlmostEqual(m["generation_ms"], 600.0)
+        self.assertAlmostEqual(m["generation_tok_s"], 3000 / 0.6, places=1)
+
+
+class LocalStreamSpeedTests(unittest.TestCase):
+    def test_live_rate_appears_after_one_second(self) -> None:
+        m = t.LocalStreamSpeed()
+        self.assertIsNone(m.record(5, 0.0))
+        self.assertIsNone(m.record(5, 0.5))
+        self.assertAlmostEqual(m.record(10, 1.0), 20.0)
+
+    def test_live_rate_is_throttled(self) -> None:
+        m = t.LocalStreamSpeed()
+        m.record(10, 0.0)
+        m.record(10, 1.0)
+        self.assertIsNone(m.record(5, 1.4))
+        self.assertAlmostEqual(m.record(5, 2.2), 30 / 2.2, places=2)
+
+    def test_final_needs_span_and_tokens(self) -> None:
+        m = t.LocalStreamSpeed()
+        self.assertIsNone(m.final())
+        m.record(1, 0.0)
+        m.record(1, 0.3)
+        self.assertIsNone(m.final())  # 0.3s < 0.4s minimum span
+        m.record(1, 0.6)
+        self.assertAlmostEqual(m.final(), 3 / 0.6, places=2)
+
+    def test_zero_count_ignored(self) -> None:
+        m = t.LocalStreamSpeed()
+        self.assertIsNone(m.record(0, 0.0))
+        self.assertIsNone(m.final())
+
     def test_visible_output_subtracts_reasoning(self) -> None:
         n, src = t.visible_output_tokens({"output_tokens": 49, "reasoning_tokens": 35})
         self.assertEqual(n, 14)
@@ -289,6 +351,180 @@ class BotIngestTests(unittest.TestCase):
         snap = self.bot.telemetry_snapshot()
         self.assertIn(snap["token_source"], ("tokenizer", "grok_runtime"))
         self.assertAlmostEqual(snap["ttft_ms"], 158.0)
+
+
+class _SeedFakeBot:
+    """Minimal stand-in so _seed_usage_from_disk can run against a temp tree."""
+
+    def __init__(self, home: Path, sid: str | None) -> None:
+        self.grok_home = home
+        self.acp = type("Acp", (), {"session_id": sid})()
+        self.context_used = 0
+        self.context_window = 500000
+        self.context_source = ""
+        self.emitted: list[int] = []
+
+    def _emit_usage(self, log: bool = False) -> None:
+        self.emitted.append(self.context_used)
+
+    def ingest_usage(self, blob: dict) -> None:
+        n, src = t.context_tokens_from_payload(blob)
+        if n is not None:
+            self.context_used = n
+            self.context_source = src
+
+
+class SeedUsageTests(unittest.TestCase):
+    def _write_signals(self, home: Path, sid: str, used: int, mtime: float) -> Path:
+        d = home / "sessions" / "%2Fcwd" / sid
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / "signals.json"
+        p.write_text(
+            json.dumps({"contextTokensUsed": used, "contextWindowTokens": 500000}),
+            encoding="utf-8",
+        )
+        os.utime(p, (mtime, mtime))
+        return p
+
+    def test_fresh_session_falls_back_to_newest_runtime_value(self) -> None:
+        import deskd as d
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            self._write_signals(home, "old-sid", 48275, 1000.0)
+            (home / "sessions" / "%2Fcwd" / "new-sid").mkdir(parents=True)
+            fake = _SeedFakeBot(home, "new-sid")
+            d.Bot._seed_usage_from_disk(fake)
+            self.assertEqual(fake.context_used, 48275)
+            self.assertEqual(fake.context_source, "grok_runtime")
+            self.assertEqual(fake.emitted, [48275])
+
+    def test_sid_match_wins_over_newer_foreign_session(self) -> None:
+        import deskd as d
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            self._write_signals(home, "sid-a", 30000, 2000.0)  # newer mtime
+            self._write_signals(home, "sid-b", 48275, 1000.0)
+            fake = _SeedFakeBot(home, "sid-b")
+            d.Bot._seed_usage_from_disk(fake)
+            self.assertEqual(fake.context_used, 48275)
+
+    def test_no_sid_still_seeds_from_newest(self) -> None:
+        import deskd as d
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            self._write_signals(home, "old-sid", 22313, 1000.0)
+            fake = _SeedFakeBot(home, None)
+            d.Bot._seed_usage_from_disk(fake)
+            self.assertEqual(fake.context_used, 22313)
+
+    def test_no_files_keeps_prior_value(self) -> None:
+        import deskd as d
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / "sessions").mkdir(parents=True)
+            fake = _SeedFakeBot(home, "new-sid")
+            d.Bot._seed_usage_from_disk(fake)
+            self.assertEqual(fake.context_used, 0)
+            self.assertEqual(fake.emitted, [])
+
+    def test_updates_jsonl_fallback_when_no_signals(self) -> None:
+        import deskd as d
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            ddir = home / "sessions" / "%2Fcwd" / "old-sid"
+            ddir.mkdir(parents=True)
+            line = json.dumps(
+                {
+                    "method": "session/update",
+                    "params": {
+                        "_meta": {
+                            "totalTokens": 26518,
+                            "streamStartMs": 1,
+                            "chunkId": "c1",
+                        }
+                    },
+                }
+            )
+            (ddir / "updates.jsonl").write_text(line + "\n", encoding="utf-8")
+            fake = _SeedFakeBot(home, "new-sid")
+            d.Bot._seed_usage_from_disk(fake)
+            self.assertEqual(fake.context_used, 26518)
+            self.assertEqual(fake.context_source, "grok_runtime")
+
+
+class MeterRetentionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import deskd as d
+        self.bot = d.Bot("b_tel", "Tel", "", "", "grok-4.6", "🤖")
+
+    def test_reset_keeps_last_speed_and_context(self) -> None:
+        self.bot.context_used = 33734
+        self.bot.context_source = "grok_runtime"
+        self.bot.tps = 42.0
+        self.bot.speed_source = "local_stream"
+        self.bot.token_source = "tokenizer"
+        self.bot._gen = {"stream_start_ms": 1}
+        self.bot.telemetry = {"x": 1}
+        self.bot.reset_telemetry()
+        self.assertEqual(self.bot.context_used, 33734)
+        self.assertEqual(self.bot.tps, 42.0)
+        self.assertEqual(self.bot.speed_source, "local_stream")
+        self.assertEqual(self.bot.token_source, "tokenizer")
+        self.assertEqual(self.bot._gen, {})
+        self.assertEqual(self.bot.telemetry, {})
+
+    def test_empty_stream_final_keeps_last_speed(self) -> None:
+        # A thought-only stream (no visible tokens) must not zero the meter.
+        self.bot.tps = 33.0
+        self.bot.speed_source = "local_stream"
+        self.bot.note_generation_chunk(
+            "",
+            {"streamStartMs": 1000, "agentTimestampMs": 1200, "turnStartMs": 0},
+            timing_only=True,
+        )
+        self.bot.finish_generation(None, None, None)
+        self.assertEqual(self.bot.tps, 33.0)
+
+    def test_local_engine_acp_publish_does_not_touch_tps(self) -> None:
+        import deskd as d
+
+        _, catalog = d.load_user_models()
+        local_id = next(
+            (mid for mid, raw in catalog.items() if d.is_local_gpu_model(mid, raw)),
+            None,
+        )
+        if not local_id:
+            self.skipTest("no local engine in catalog")
+        self.bot.model = local_id
+        self.bot.note_generation_chunk(
+            "Hello world, this is a test of the speed latch behavior.",
+            {"streamStartMs": 1000, "agentTimestampMs": 1158, "turnStartMs": 0},
+        )
+        self.assertEqual(self.bot.tps, 0.0)
+        self.assertEqual(self.bot.speed_source, "")
+
+        # Cloud model: the same ACP measurement latches as before.
+        self.bot.model = "grok-4.6"
+        self.bot.note_generation_chunk(
+            "Hello world, this is a test of the speed latch behavior.",
+            {"streamStartMs": 2000, "agentTimestampMs": 2158, "turnStartMs": 0},
+        )
+        self.assertGreater(self.bot.tps, 0)
+        self.assertEqual(self.bot.speed_source, "stream_measurement")
+
+    def test_note_local_stream_speed_latches(self) -> None:
+        self.bot.note_local_stream_speed(33.3, 100)
+        self.assertAlmostEqual(self.bot.tps, 33.3)
+        self.assertEqual(self.bot.speed_source, "local_stream")
+        self.assertEqual(self.bot.token_source, "tokenizer")
+        for bad in (0.0, -5.0, float("nan"), 99999.0):
+            self.bot.note_local_stream_speed(bad, 10)
+        self.assertAlmostEqual(self.bot.tps, 33.3)
 
 
 class FrontendFormulaTests(unittest.TestCase):

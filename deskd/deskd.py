@@ -161,7 +161,7 @@ _rebind_http = threading.Event()
 
 lock = threading.RLock()
 bots: dict[str, "Bot"] = {}
-subscribers: list[tuple[threading.Event, list[dict[str, Any]]]] = []
+subscribers: list[tuple[threading.Event, list[dict[str, Any]], Any]] = []
 cluster: Cluster | None = None
 _GROK_CAP_CACHE: dict[str, Any] | None = None
 
@@ -928,20 +928,38 @@ def _attach_voice_page(event: dict[str, Any]) -> None:
         event["page_id"] = page
 
 
+def _drop_sse_subscriber(handler: Any) -> None:
+    """Close a stalled SSE connection so its client reconnects with a fresh stream."""
+    try:
+        sock = getattr(handler, "connection", None)
+        if sock is not None:
+            sock.shutdown(socket.SHUT_RDWR)
+            sock.close()
+    except OSError:
+        pass
+
+
 def emit(event: dict[str, Any]) -> None:
     event = {"v": 1, **event}
     if cluster is not None:
         event.setdefault("origin_node", cluster.node_name)
     _attach_voice_page(event)
     with lock:
-        dead = []
-        for i, (wake, q) in enumerate(subscribers):
+        keep: list = []
+        dead: list[Any] = []
+        for sub in subscribers:
+            wake, q, handler = sub
             q.append(event)
             wake.set()
             if len(q) > 500:
-                dead.append(i)
-        for i in reversed(dead):
-            subscribers.pop(i)
+                # Slow consumer: drop it and close the socket so EventSource
+                # notices and reconnects instead of receiving keepalives forever.
+                dead.append(handler)
+                continue
+            keep.append(sub)
+        subscribers[:] = keep
+    for handler in dead:
+        _drop_sse_subscriber(handler)
 
 
 virtual_body.bind_emit(emit)
@@ -1045,8 +1063,16 @@ _SAVED_MEDIA_LINE = re.compile(
 
 
 def visible_user_text(text: str) -> str:
-    """Keep the user's typed words; drop auto-appended media save lines."""
-    cleaned = _SAVED_MEDIA_LINE.sub("", text or "")
+    """Keep the user's typed words; drop auto-appended media save lines.
+
+    Whitespace is preserved exactly unless media lines were removed — the
+    collapse only repairs the double blanks a removed line leaves behind, so
+    pasted text round-trips as-is.
+    """
+    text = (text or "").strip()
+    if not _SAVED_MEDIA_LINE.search(text):
+        return text
+    cleaned = _SAVED_MEDIA_LINE.sub("", text)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
@@ -2140,6 +2166,81 @@ def _toml_scalar(value: Any) -> str:
     return f'"{s}"'
 
 
+def load_user_mcp_servers() -> dict[str, dict[str, Any]]:
+    """Enabled `[mcp_servers.*]` tables from the host `~/.grok/config.toml`."""
+    cfg_path = USER_GROK_HOME / "config.toml"
+    if not cfg_path.is_file():
+        return {}
+    try:
+        with cfg_path.open("rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    raw = data.get("mcp_servers") or {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for name, spec in raw.items():
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("enabled", True) is False:
+            continue
+        key = str(name or "").strip()
+        if key:
+            out[key] = spec
+    return out
+
+
+def user_mcp_acp_specs() -> list[dict[str, Any]]:
+    """ACP stdio specs for enabled host MCP servers (skips URL-only remotes)."""
+    out: list[dict[str, Any]] = []
+    for name, spec in load_user_mcp_servers().items():
+        command = str(spec.get("command") or "").strip()
+        if not command:
+            continue
+        raw_args = spec.get("args") if isinstance(spec.get("args"), list) else []
+        env_tbl = spec.get("env") if isinstance(spec.get("env"), dict) else {}
+        out.append(
+            {
+                "name": name,
+                "command": command,
+                "args": [str(a) for a in raw_args],
+                "env": [{"name": str(k), "value": str(v)} for k, v in env_tbl.items()],
+            }
+        )
+    return out
+
+
+def _append_mcp_servers_toml(lines: list[str], servers: dict[str, dict[str, Any]]) -> None:
+    nested = ("env", "headers", "tool_timeouts")
+    for name, spec in servers.items():
+        lines.append(f"[mcp_servers.{toml_key(name)}]")
+        for key, val in spec.items():
+            if key in nested or val is None:
+                continue
+            if isinstance(val, list):
+                if not val:
+                    lines.append(f"{key} = []")
+                    continue
+                lines.append(f"{key} = [")
+                for item in val:
+                    lines.append(f"    {_toml_scalar(item)},")
+                lines.append("]")
+            elif isinstance(val, dict):
+                continue
+            else:
+                lines.append(f"{key} = {_toml_scalar(val)}")
+        lines.append("")
+        for sub in nested:
+            tbl = spec.get(sub)
+            if not isinstance(tbl, dict) or not tbl:
+                continue
+            lines.append(f"[mcp_servers.{toml_key(name)}.{sub}]")
+            for k, v in tbl.items():
+                lines.append(f"{k} = {_toml_scalar(v)}")
+            lines.append("")
+
+
 def write_user_models(default: str, catalog: dict[str, Any]) -> None:
     """Replace [models] / [model.*] in ~/.grok/config.toml; leave other tables alone."""
     cfg_path = USER_GROK_HOME / "config.toml"
@@ -2281,6 +2382,7 @@ def refresh_host_model_catalog() -> tuple[str, list[dict[str, Any]]]:
                 catalog,
                 bot_id=bot.id,
                 permission_mode="always-approve" if bot_kind_has_host_coding(bot) else "default",
+                inherit_mcp=bot_kind_is_grok_build(bot),
             )
         except Exception:
             pass
@@ -11218,6 +11320,7 @@ def write_child_config(
     *,
     permission_mode: str = "default",
     default_reasoning_effort: str = "",
+    inherit_mcp: bool = False,
 ) -> None:
     mode = permission_mode if permission_mode in {
         "default",
@@ -11298,6 +11401,12 @@ def write_child_config(
         if tbl.get("base_url") and not saw_idle:
             lines.append("inference_idle_timeout_secs = 600")
         lines.append("")
+    if inherit_mcp:
+        inherited = load_user_mcp_servers()
+        if inherited:
+            lines.append("# Inherited from host ~/.grok/config.toml (Grok Build inherit_user_mcp).")
+            _append_mcp_servers_toml(lines, inherited)
+    bot_home.mkdir(parents=True, exist_ok=True)
     (bot_home / "config.toml").write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -11312,6 +11421,32 @@ def strip_assistant_padding(text: str) -> str:
 # Tail/head overlap shorter than this is a token delta, not a resent window.
 # 1-char overlap turned "Te"+"ela" / "Te"+"e" into "Tela".
 _STREAM_MIN_OVERLAP = 8
+# Same essay restarted (truncated stream + full snapshot) shares this much prefix.
+_STREAM_RESTART_HEAD = 80
+
+
+def _lcp_len(a: str, b: str) -> int:
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
+def collapse_restarted_assistant(text: str, head_n: int = _STREAM_RESTART_HEAD) -> str:
+    """If a long opening is pasted twice (truncated copy + full restart), keep one."""
+    text = text or ""
+    if len(text) < head_n * 2:
+        return text
+    head = text[:head_n]
+    pos = text.find(head, head_n)
+    if pos < 0:
+        return text
+    first, second = text[:pos], text[pos:]
+    if _lcp_len(first, second) < head_n:
+        return text
+    return second if len(second) >= len(first) else first
 
 
 def merge_assistant_stream(cur: str, incoming: str) -> str:
@@ -11321,24 +11456,39 @@ def merge_assistant_stream(cur: str, incoming: str) -> str:
     text and get thrown away, which is what flattened local Qwen replies.
     Never treat a 1–7 char tail overlap as a resend — Qwen splits "Teela" across
     tokens that share an "e", and that collapse is what the UI showed as "Tela".
+    A later full snapshot often arrives with a leading newline after a truncated
+    prefix; that used to concatenate the essay onto itself.
     """
     cur = cur or ""
     incoming = incoming or ""
     if not incoming:
-        return cur
+        return collapse_restarted_assistant(cur)
     if not cur:
         return incoming
-    if incoming == cur:
+    inc = incoming.lstrip("\r\n") or incoming
+    if incoming == cur or inc == cur:
         return cur
     if incoming.startswith(cur):
-        return incoming
+        return collapse_restarted_assistant(incoming)
+    if inc.startswith(cur):
+        return collapse_restarted_assistant(inc)
     if cur.startswith(incoming) and len(incoming) >= min(32, len(cur)):
         return cur
-    max_k = min(len(cur), len(incoming))
-    for k in range(max_k, _STREAM_MIN_OVERLAP - 1, -1):
-        if cur.endswith(incoming[:k]):
-            return cur + incoming[k:]
-    return cur + incoming
+    if cur.startswith(inc) and len(inc) >= min(32, len(cur)):
+        return cur
+    if len(cur) >= 64 and cur in inc:
+        return collapse_restarted_assistant(inc)
+    if len(inc) >= 64 and inc in cur:
+        return cur
+    if _lcp_len(cur, inc) >= _STREAM_RESTART_HEAD:
+        chosen = inc if len(inc) >= len(cur) else cur
+        return collapse_restarted_assistant(chosen)
+    for src in (incoming, inc):
+        max_k = min(len(cur), len(src))
+        for k in range(max_k, _STREAM_MIN_OVERLAP - 1, -1):
+            if cur.endswith(src[:k]):
+                return collapse_restarted_assistant(cur + src[k:])
+    return collapse_restarted_assistant(cur + incoming)
 
 
 def grok_version() -> str:
@@ -11681,11 +11831,25 @@ def tool_command_from_update(update: dict[str, Any]) -> str:
     return ""
 
 
+def _with_inherited_user_mcp(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Append host MCP servers (e.g. chrome-devtools) without replacing desk specs."""
+    seen = {str(s.get("name") or "") for s in specs}
+    out = list(specs)
+    for extra in user_mcp_acp_specs():
+        name = str(extra.get("name") or "")
+        if name and name not in seen:
+            out.append(extra)
+            seen.add(name)
+    return out
+
+
 def acp_mcp_specs(bot: Any, here: Path, env_mcp: list[dict[str, str]]) -> list[dict[str, Any]]:
     """MCP servers attached to an ACP session.
 
     Grok Build bots match a regular grok TUI: native file/shell/browser tools,
     plus desk model registration and team/memory. MiniOS desktop MCP is Teela.
+    Host MCP (chrome-devtools) is attached on ACP for both kinds; Teela's MiniOS
+    llama.cpp loop does not see those tools.
     """
     kind = normalize_bot_kind(getattr(bot, "kind", None)) or "hybrid"
     bid = getattr(bot, "id", "")
@@ -11699,21 +11863,21 @@ def acp_mcp_specs(bot: Any, here: Path, env_mcp: list[dict[str, str]]) -> list[d
         }
 
     if bot_kind_is_grok_build(bot):
-        return [
-            spec("desk_models", "models_mcp.py"),
-            spec("desk_team", "desk_mcp.py"),
-            spec("bot_memory", "memory_mcp.py"),
-        ]
-    out: list[dict[str, Any]] = []
-    out.append(spec("bot_browser", "browser_mcp.py"))
-    out.extend(
+        return _with_inherited_user_mcp(
+            [
+                spec("desk_models", "models_mcp.py"),
+                spec("desk_team", "desk_mcp.py"),
+                spec("bot_memory", "memory_mcp.py"),
+            ]
+        )
+    return _with_inherited_user_mcp(
         [
+            spec("bot_browser", "browser_mcp.py"),
             spec("desk_team", "desk_mcp.py"),
             spec("bot_desktop", "desktop_mcp.py", ["--kind", kind]),
             spec("bot_memory", "memory_mcp.py"),
         ]
     )
-    return out
 
 
 def acp_session_meta(bot: Any) -> dict[str, Any]:
@@ -12208,6 +12372,25 @@ def emit_local_activity(bot: Any, status: str, thought: str | None = None) -> No
     )
 
 
+def emit_local_progress(bot: Any, text: str) -> None:
+    """Emit a transient TUI-style progress line (an empty text clears it)."""
+    if bot is None or turn_was_cancelled(bot):
+        return
+    acp = getattr(bot, "acp", None)
+    if acp is not None:
+        acp._last_acp_event = time.time()
+    emit(
+        {
+            "type": "session.update",
+            "bot_id": bot.id,
+            "update": {
+                "sessionUpdate": "agent_progress",
+                "content": {"type": "text", "text": text or ""},
+            },
+        }
+    )
+
+
 def stop_local_prefill_progress(bot: Any) -> None:
     ev = getattr(bot, "_prefill_stop", None) if bot is not None else None
     if ev is not None:
@@ -12225,10 +12408,10 @@ def start_local_prefill_progress(bot: Any, est_tokens: int) -> None:
     bot._prefill_stop = stop
     n = max(0, int(est_tokens or 0))
     label = f"{n:,}" if n else "the"
-    emit_local_activity(
+    emit_local_activity(bot, "Thinking…")
+    emit_local_progress(
         bot,
-        "Thinking…",
-        f"Reading the local-model prompt ({label} tokens). First token waits on GPU prefill.\n",
+        f"Reading the local-model prompt ({label} tokens). First token waits on GPU prefill…",
     )
 
     def tick() -> None:
@@ -12240,10 +12423,12 @@ def start_local_prefill_progress(bot: Any, est_tokens: int) -> None:
             elapsed = time.time() - t0
             if n <= 0:
                 emit_local_activity(bot, "Thinking…")
+                emit_local_progress(bot, f"Reading the local-model prompt ({label} tokens)…")
                 continue
             done = min(n, int(elapsed * _PREFILL_TOK_S))
             pct = min(99, int(100 * done / n))
             emit_local_activity(bot, f"Thinking… reading prompt {pct}%")
+            emit_local_progress(bot, f"Reading the local-model prompt ({label} tokens)… {pct}%")
 
     threading.Thread(target=tick, daemon=True, name="local-prefill-progress").start()
 
@@ -12279,11 +12464,11 @@ class AcpClient:
             box["error"] = err
             ev.set()
 
-    def start(self) -> None:
+    def start(self, load_session_id: str | None = None) -> None:
         with self._life:
-            self._start_locked()
+            self._start_locked(load_session_id=load_session_id)
 
-    def _start_locked(self) -> None:
+    def _start_locked(self, load_session_id: str | None = None) -> None:
         if self.proc is not None and self.proc.poll() is None:
             self.alive = True
             return
@@ -12385,20 +12570,36 @@ class AcpClient:
         if effort:
             meta["reasoningEffort"] = effort
             meta["reasoning_effort"] = effort
-        result = self.request(
-            "session/new",
-            {
-                "cwd": str(self.bot.workspace),
-                "mcpServers": mcp,
-                "modelId": self.bot.model,
-                "_meta": meta,
-            },
-            timeout=30,
-        )
-        self.session_id = result.get("sessionId")
+        session_params = {
+            "cwd": str(self.bot.workspace),
+            "mcpServers": mcp,
+            "modelId": self.bot.model,
+            "_meta": meta,
+        }
+        result: dict[str, Any] | None = None
+        loaded: str | None = None
+        if load_session_id:
+            try:
+                result = self.request(
+                    "session/load",
+                    {**session_params, "sessionId": load_session_id},
+                    timeout=30,
+                )
+            except Exception as e:
+                print(f"[deskd] ACP session/load failed ({e}); starting a new session", flush=True)
+                result = None
+            else:
+                # A null ACP result means the session loaded fine.
+                loaded = str((result or {}).get("sessionId") or load_session_id)
+                print(f"[deskd] ACP resumed session {loaded[:13]}…", flush=True)
+        if loaded is None:
+            result = self.request("session/new", session_params, timeout=30)
+        self.session_id = (result or {}).get("sessionId") or loaded
         if not self.session_id:
             raise RuntimeError(f"session/new failed: {result}")
-        self.bot.reset_telemetry(used=0)
+        self.bot.record_acp_session(self.session_id)
+        self.bot.attach_acp_session(self.session_id)
+        self.bot.reset_telemetry()
         self.bot._seed_usage_from_disk()
         wanted = self.bot.model
         self.bot.apply_models(result.get("models") or {})
@@ -12541,7 +12742,7 @@ class AcpClient:
                 self.alive = True
                 return
             self._kill_proc()
-            self._start_locked()
+            self._start_locked(load_session_id=self.bot.last_acp_session_id())
 
     def prompt(self, text: str, images: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         self._turn_cancel.clear()
@@ -12795,7 +12996,7 @@ class AcpClient:
             }
         )
         try:
-            self.start()
+            self.start(load_session_id=self.bot.last_acp_session_id())
             self.bot.status = "Ready"
             emit(
                 {
@@ -13644,7 +13845,8 @@ class Bot:
         cid = self._new_chat_id()
         data = self.ensure_timeline()
         self.messages = []
-        self.reset_telemetry(used=0)
+        self.reset_telemetry()
+        self._seed_usage_from_disk()
         data["chats"].append(self._chat_meta_from_messages(cid, []))
         data["activeId"] = cid
         self.chat_id = cid
@@ -13669,9 +13871,10 @@ class Bot:
         data["activeId"] = cid
         self._write_timeline(data)
         self.persist_messages()
-        self.reset_telemetry(used=0)
+        self.reset_telemetry()
         self.append_log({"type": "chat.open", "chat_id": cid})
-        self._restart_session()
+        chat_row = next((c for c in data["chats"] if isinstance(c, dict) and c.get("id") == cid), None)
+        self._restart_session(load_session_id=str((chat_row or {}).get("grokSession") or "") or None)
         self.status = "Ready"
         self._emit_usage()
         return self._emit_chats("chats.updated", {"chat_id": cid})
@@ -13686,7 +13889,7 @@ class Bot:
             self.messages = []
             self.persist_messages()
             self.append_log({"type": "chat.delete", "chat_id": cid, "cleared": True})
-            self.reset_telemetry(used=0)
+            self.reset_telemetry()
             self._restart_session()
             self.status = "Ready"
             return self._emit_chats("chats.updated", {"chat_id": cid})
@@ -13709,7 +13912,7 @@ class Bot:
             self.messages = self._read_jsonl(self.archive_path(next_id))
             self.chat_id = next_id
             self.persist_messages()
-            self.reset_telemetry(used=0)
+            self.reset_telemetry()
             self._restart_session()
             self.status = "Ready"
         else:
@@ -13771,7 +13974,9 @@ class Bot:
         if self.messages and self.messages[-1].get("open"):
             self.messages[-1]["open"] = False
             if self.messages[-1].get("role") == "assistant":
-                self.messages[-1]["text"] = strip_assistant_padding(self.messages[-1].get("text") or "")
+                self.messages[-1]["text"] = collapse_restarted_assistant(
+                    strip_assistant_padding(self.messages[-1].get("text") or "")
+                )
             if self.messages[-1].get("role") == "thought":
                 self.messages[-1]["t1"] = time.time()
             closed = {k: v for k, v in self.messages[-1].items() if k != "open"}
@@ -13875,7 +14080,7 @@ class Bot:
         self.messages = []
         self.persist_messages()
         self.append_log({"type": "clear", "removed": removed})
-        self.reset_telemetry(used=0)
+        self.reset_telemetry()
         self._restart_session()
         self.status = "Ready"
         emit(
@@ -14082,6 +14287,7 @@ class Bot:
             models,
             bot_id=self.id,
             permission_mode="always-approve" if bot_kind_has_host_coding(self) else "default",
+            inherit_mcp=bot_kind_is_grok_build(self),
         )
         self._link_grok_build_home()
         copy_auth(self.grok_home / "auth.json")
@@ -14119,29 +14325,43 @@ class Bot:
         self._seed_usage_from_disk()
 
     def _seed_usage_from_disk(self) -> None:
-        """Restore occupancy from Grok Build session files, never billed turn sums."""
-        roots = [
-            self.grok_home / "sessions",
-            self.grok_home / "tui-home" / "sessions",
-        ]
+        """Restore occupancy from Grok Build session files, never billed turn sums.
+
+        Prefers the current ACP session's files; when those are absent (fresh
+        session after a restart / chat op) falls back to the newest runtime
+        files so the meter keeps the TUI's last known value instead of 0.
+        """
         sid = self.acp.session_id if self.acp else None
-        if not sid:
-            return
         signals: Path | None = None
         updates: Path | None = None
-        for root in roots:
-            if not root.is_dir():
-                continue
-            for p in root.glob("**/signals.json"):
-                if p.parent.name != sid:
+        if sid:
+            for root in (
+                self.grok_home / "sessions",
+                self.grok_home / "tui-home" / "sessions",
+            ):
+                if not root.is_dir():
                     continue
-                if signals is None or p.stat().st_mtime > signals.stat().st_mtime:
-                    signals = p
-            for p in root.glob("**/updates.jsonl"):
-                if p.parent.name != sid:
-                    continue
-                if updates is None or p.stat().st_mtime > updates.stat().st_mtime:
-                    updates = p
+                for p in root.glob("**/signals.json"):
+                    if p.parent.name != sid:
+                        continue
+                    if signals is None or p.stat().st_mtime > signals.stat().st_mtime:
+                        signals = p
+                for p in root.glob("**/updates.jsonl"):
+                    if p.parent.name != sid:
+                        continue
+                    if updates is None or p.stat().st_mtime > updates.stat().st_mtime:
+                        updates = p
+        # Newest ACP-root files win; tui-home holds the mirror's own sessions.
+        root = self.grok_home / "sessions"
+        if root.is_dir():
+            if signals is None:
+                for p in root.glob("**/signals.json"):
+                    if signals is None or p.stat().st_mtime > signals.stat().st_mtime:
+                        signals = p
+            if updates is None:
+                for p in root.glob("**/updates.jsonl"):
+                    if updates is None or p.stat().st_mtime > updates.stat().st_mtime:
+                        updates = p
         if signals and signals.is_file():
             try:
                 data = json.loads(signals.read_text(encoding="utf-8"))
@@ -14833,13 +15053,73 @@ class Bot:
                 except OSError:
                     pass
 
-    def _restart_session(self) -> None:
+    def _restart_session(self, load_session_id: str | None = None) -> None:
         try:
             self.acp.stop()
         except Exception:
             pass
         self.acp = AcpClient(self)
-        self.acp.start()
+        self.acp.start(load_session_id=load_session_id)
+
+    def record_acp_session(self, session_id: str) -> None:
+        """Persist the live ACP session so a restart can resume it."""
+        try:
+            self.grok_home.mkdir(parents=True, exist_ok=True)
+            self.grok_home.joinpath("last_acp_session.json").write_text(
+                json.dumps({
+                    "session_id": str(session_id or ""),
+                    "chat_id": str(self.chat_id or ""),
+                    "ts": time.time(),
+                }),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def last_acp_session_id(self) -> str | None:
+        """Recorded session to resume for the current chat, if any."""
+        try:
+            data = json.loads(self.grok_home.joinpath("last_acp_session.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return self.newest_persisted_session_id()
+        sid = str((data or {}).get("session_id") or "").strip()
+        if not sid:
+            return None
+        rec_chat = str((data or {}).get("chat_id") or "")
+        want = str(self.chat_id or "")
+        if rec_chat and want and rec_chat != want:
+            return None
+        return sid
+
+    def newest_persisted_session_id(self) -> str | None:
+        """Bootstrap only: newest on-disk session with content (no record yet)."""
+        root = self.grok_home / "sessions"
+        if not root.is_dir():
+            return None
+        best: tuple[float, str] | None = None
+        try:
+            for updates in root.glob("**/updates.jsonl"):
+                st = updates.stat()
+                if st.st_size == 0:
+                    continue
+                if best is None or st.st_mtime > best[0]:
+                    best = (st.st_mtime, updates.parent.name)
+        except OSError:
+            return None
+        return best[1] if best else None
+
+    def attach_acp_session(self, session_id: str) -> None:
+        """Bind the live ACP session to the active chat for chat-scoped resume."""
+        try:
+            data = self.ensure_timeline()
+            target = self.chat_id or data.get("activeId")
+            for row in data.get("chats") or []:
+                if isinstance(row, dict) and row.get("id") == target:
+                    row["grokSession"] = str(session_id)
+                    break
+            self._write_timeline(data)
+        except Exception:
+            pass
 
     def save_soul(self, body: str) -> dict[str, Any]:
         return self.update_identity({"soul": body})
@@ -14893,6 +15173,7 @@ class Bot:
                 user_models,
                 bot_id=self.id,
                 permission_mode="always-approve" if bot_kind_has_host_coding(self) else "default",
+                inherit_mcp=bot_kind_is_grok_build(self),
             )
             if model in user_models and user_models[model].get("context_window"):
                 try:
@@ -14905,7 +15186,8 @@ class Bot:
                         self.context_window = int(m["context_window"])
                     except (TypeError, ValueError):
                         pass
-            self.reset_telemetry(used=0)
+            self.reset_telemetry()
+            self._seed_usage_from_disk()
         if "workspace_share_with" in body and isinstance(body.get("workspace_share_with"), list):
             self.set_workspace_share_with([str(x) for x in body.get("workspace_share_with") or []])
         self.write_profile()
@@ -14919,6 +15201,7 @@ class Bot:
                 user_models,
                 bot_id=self.id,
                 permission_mode="always-approve" if bot_kind_has_host_coding(self) else "default",
+                inherit_mcp=bot_kind_is_grok_build(self),
             )
             self._write_agents()
             agent_md = self.root / "agent.md"
@@ -14994,12 +15277,10 @@ class Bot:
         }
 
     def reset_telemetry(self, *, used: int | None = None) -> None:
+        """Reset the context window; keep the last measured tok/s (TUI keeps it too)."""
         if used is not None:
             self.context_used = int(used)
             self.context_source = "grok_runtime" if used else ""
-        self.tps = 0.0
-        self.speed_source = ""
-        self.token_source = ""
         self._gen = {}
         self.telemetry = {}
 
@@ -15127,8 +15408,15 @@ class Bot:
             model_calls=gen.get("model_calls"),
             elapsed_ms=tel._as_float(gen.get("elapsed_ms")),
         )
+        cached = getattr(self, "_local_engine_cache", None)
+        if not cached or cached[0] != self.model:
+            cached = (str(self.model or ""), uses_local_text_llm(str(self.model or "")))
+            self._local_engine_cache = cached
+        local_engine = cached[1]
         self.token_source = metrics["token_source"]
-        if metrics["speed_source"]:
+        # Local engines: ACP chunk timing is batched per model call, so ACP
+        # estimates would clobber the proxy's real per-token measurement.
+        if metrics["speed_source"] and not local_engine:
             self.speed_source = metrics["speed_source"]
         first_ms = gen.get("first_out_ms")
         last_ms = gen.get("last_out_ms")
@@ -15137,10 +15425,10 @@ class Bot:
             and last_ms is not None
             and 50 <= (float(last_ms) - float(first_ms)) < 400
         )
-        # Skip live updates for short ACP dumps; finalize uses wall-clock instead.
-        if final or not burst:
-            if metrics["generation_tok_s"] or final:
-                self.tps = float(metrics["generation_tok_s"] or 0.0)
+        # Only positive measurements latch; the meter keeps the last good value
+        # until the next generation (TUI behavior).
+        if not local_engine and (final or not burst) and metrics["generation_tok_s"]:
+            self.tps = float(metrics["generation_tok_s"])
         self.telemetry = {
             "current_tokens": self.context_used,
             "max_tokens": self.context_window,
@@ -15219,6 +15507,19 @@ class Bot:
                 f"tok/s={self.tps:.2f} src={self.speed_source or 'n/a'} tokens={self.token_source or 'n/a'}",
                 flush=True,
             )
+
+    def note_local_stream_speed(self, tok_s: float, tokens: int, *, log: bool = False) -> None:
+        """Latch tok/s measured on the local-engine SSE path (real token timing)."""
+        try:
+            tok_s = float(tok_s)
+        except (TypeError, ValueError):
+            return
+        if not tok_s or tok_s != tok_s or tok_s <= 0.0 or tok_s > 2000.0:
+            return
+        self.tps = tok_s
+        self.speed_source = "local_stream"
+        self.token_source = "tokenizer"
+        self._emit_usage(log=log)
 
     def record_local_generation(
         self,
@@ -15420,12 +15721,14 @@ class Bot:
             bot_id=self.id,
             permission_mode="always-approve" if bot_kind_has_host_coding(self) else "default",
             default_reasoning_effort=grok_effort_wire(self.effort or ""),
+            inherit_mcp=bot_kind_is_grok_build(self),
         )
         if changed:
             user_cw = user_models.get(model_id, {}).get("context_window") if model_id in user_models else None
             catalog_cw = next((m.get("context_window") for m in self.models if m.get("id") == self.model), None)
             self.context_window = tel.resolve_context_window(self.model, user_cw, catalog_cw)
-            self.reset_telemetry(used=0)
+            self.reset_telemetry()
+            self._seed_usage_from_disk()
             self._write_agents()
             # Keep PROFILE.toml model field in sync (rewrite name line).
             prof = self.root / "PROFILE.toml"
@@ -16037,7 +16340,7 @@ def load_existing() -> None:
         bots[bid] = bot
         try:
             bot.provision()
-            bot.acp.start()
+            bot.acp.start(load_session_id=bot.last_acp_session_id())
             bot.status = "Ready"
         except Exception as e:
             bot.status = f"Error: {e}"
@@ -16586,6 +16889,7 @@ class Handler(BaseHTTPRequestHandler):
         saw_tool = False
         forwarded = False
         template: dict[str, Any] | None = None
+        speed = tel.LocalStreamSpeed()
         fp = getattr(resp, "fp", None) or resp
         while True:
             if turn_was_cancelled(bot):
@@ -16634,6 +16938,9 @@ class Handler(BaseHTTPRequestHandler):
                         if isinstance(val, str) and val:
                             visible = True
                             content_parts.append(val)
+                            live = speed.record(tel.count_tokens_local(val), time.monotonic())
+                            if live is not None and bot is not None:
+                                bot.note_local_stream_speed(live, speed.tokens)
             if toolish:
                 saw_tool = True
                 continue
@@ -16643,12 +16950,17 @@ class Handler(BaseHTTPRequestHandler):
                 forwarded = True
                 stop_local_prefill_progress(bot)
                 emit_local_activity(bot, "Speaking…")
+                emit_local_progress(bot, "")
             try:
                 chunk = "data: " + json.dumps(obj, separators=(",", ":")) + "\n\n"
                 self.wfile.write(chunk.encode())
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 return
+        if bot is not None:
+            final_speed = speed.final()
+            if final_speed is not None:
+                bot.note_local_stream_speed(final_speed, speed.tokens, log=True)
         if saw_tool:
             calls = assemble_stream_tool_calls(
                 stream_objs,
@@ -17890,8 +18202,11 @@ class Handler(BaseHTTPRequestHandler):
         wake = threading.Event()
         q: list[dict[str, Any]] = []
         with lock:
-            subscribers.append((wake, q))
+            subscribers.append((wake, q, self))
         try:
+            # A stalled client (phone Wi-Fi drop, screen off) must not hold a
+            # write open forever: fail the write so the client can reconnect.
+            self.connection.settimeout(20.0)
             self.wfile.write(b":ok\n\n")
             self.wfile.flush()
             while True:
@@ -17911,12 +18226,12 @@ class Handler(BaseHTTPRequestHandler):
                     payload = json.dumps(ev).encode()
                     self.wfile.write(b"data: " + payload + b"\n\n")
                 self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ssl.SSLEOFError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ssl.SSLEOFError, TimeoutError):
             pass
         finally:
             with lock:
                 try:
-                    subscribers.remove((wake, q))
+                    subscribers.remove((wake, q, self))
                 except ValueError:
                     pass
 

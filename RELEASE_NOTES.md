@@ -2,6 +2,39 @@
 
 This corrective release restores the **0.9.1-rc3 frontend behavior** and applies the requested UI changes as cosmetic/layout changes instead of replacing the frontend structure.
 
+## Phone/LAN clients no longer freeze on the event stream
+
+Chatting from a phone on the LAN could leave the page frozen (no new messages until a refresh). When a client's connection stalled briefly (Wi-Fi wobble, screen off), the server kept queuing events for it; past 500 queued events the client was dropped **without closing the socket**, so the browser's `EventSource` saw keepalives but never another event and never reconnected.
+
+- Dropping a slow SSE subscriber now closes its socket, so the browser reconnects with a fresh stream.
+- SSE connections have a 20s write timeout: a fully stalled pipe self-heals instead of hanging forever.
+- Verified live: a stalled client (tiny receive buffer, not reading) was disconnected by the server mid-burst while a healthy client kept receiving all events.
+
+## Grok Build bots keep their conversation across restarts
+
+A Grok Build bot used to start a brand-new Grok Build session every time its ACP agent process was (re)started — after every crash, deskd restart, model change, or chat operation — so the bot re-read the whole workspace context for every question. Grok Build already persists every session under `~/.grok/bots/<id>/grok-home/sessions/`; deskd now uses that:
+
+- The live ACP session ID is recorded in `grok-home/last_acp_session.json` (keyed to the active chat) and bound to the chat row as `grokSession`.
+- When the agent process restarts (crash respawn, deskd restart, `ensure()`), deskd sends ACP `session/load` for the recorded session and only falls back to `session/new` when no session is recorded or the load fails. A null `session/load` result counts as success.
+- Opening an older chat resumes that chat's bound session when one exists.
+- Intentional fresh starts (new chat, clear chat, delete last chat, identity or model change, rewind fallback) still create new sessions.
+- First run after the upgrade (no record file yet) bootstraps from the newest on-disk session that has content.
+
+Verified end to end: a codeword given to the System bot was still answered correctly after the ACP child process was killed and respawned mid-conversation.
+
+## Chrome DevTools MCP on Grok Build (Teela ACP fallback only)
+
+Host MCP servers from `~/.grok/config.toml` (Chrome DevTools) are now inherited by MiniOS bots:
+
+- **Grok Build** bots get them in the child `GROK_HOME` config and on every ACP `session/new`, including bots created later.
+- **Teela Brain** gets them on the ACP fallback session only. The MiniOS llama.cpp body/desktop loop is unchanged and still uses `bot_browser` / desktop tools.
+
+## Chat UI: todos, progress, effort, and paste
+
+- Todo lists and a live progress line render in chat; Grok Build shows a reasoning-effort chip.
+- Local tok/s uses per-token stream timing instead of ACP burst snapshots.
+- User bubbles keep pasted newlines (`white-space: pre-wrap`). Restarted assistant snapshots no longer duplicate the essay.
+
 ## Fixes: long ACP turns and login after sleep
 
 - **ACP `session/prompt` timeout** is idle silence, not a 10-minute wall clock. Tokens, tools, thoughts, and local prefill ticks keep a coding turn alive. A dead local engine still fails in ~12s; a hung turn with no events still times out after 10 minutes of silence.

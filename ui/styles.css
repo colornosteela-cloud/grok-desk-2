@@ -89,6 +89,9 @@ html[data-theme="dark"], body.dark { color-scheme: dark; }
   background: var(--bubble-user);
   color: var(--bubble-user-text);
   border-bottom-right-radius: 6px;
+  /* Pasted/typed text is inserted as a raw text node — keep its newlines and spacing. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .bubble.assistant, .msg.agent {
   align-self: flex-start;

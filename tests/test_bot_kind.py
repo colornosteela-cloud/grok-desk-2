@@ -213,16 +213,76 @@ class BotKindTests(unittest.TestCase):
     def test_grok_build_acp_skips_minios_mcp(self) -> None:
         here = Path("/tmp")
         env = [{"name": "GROK_DESK_URL", "value": "http://127.0.0.1:8742"}]
-        grok = d.acp_mcp_specs(_KindBot("grok-build"), here, env)
+        with patch.object(d, "user_mcp_acp_specs", return_value=[]):
+            grok = d.acp_mcp_specs(_KindBot("grok-build"), here, env)
+            teela = d.acp_mcp_specs(_KindBot("teela-brain"), here, env)
         names = [s["name"] for s in grok]
         self.assertEqual(names, ["desk_models", "desk_team", "bot_memory"])
         self.assertNotIn("bot_desktop", names)
         self.assertNotIn("bot_browser", names)
-        teela = d.acp_mcp_specs(_KindBot("teela-brain"), here, env)
         tnames = [s["name"] for s in teela]
         self.assertIn("bot_desktop", tnames)
         self.assertIn("bot_browser", tnames)
         self.assertNotIn("desk_models", tnames)
+
+    def test_acp_inherits_user_mcp_for_grok_build_and_teela(self) -> None:
+        here = Path("/tmp")
+        env = [{"name": "GROK_DESK_URL", "value": "http://127.0.0.1:8742"}]
+        extra = [
+            {
+                "name": "chrome-devtools",
+                "command": "/home/roni/bin/npx",
+                "args": ["-y", "chrome-devtools-mcp@latest"],
+                "env": [{"name": "DISPLAY", "value": ":0"}],
+            }
+        ]
+        with patch.object(d, "user_mcp_acp_specs", return_value=extra):
+            grok = d.acp_mcp_specs(_KindBot("grok-build"), here, env)
+            teela = d.acp_mcp_specs(_KindBot("teela-brain"), here, env)
+        self.assertEqual(
+            [s["name"] for s in grok],
+            ["desk_models", "desk_team", "bot_memory", "chrome-devtools"],
+        )
+        self.assertEqual(grok[-1]["command"], "/home/roni/bin/npx")
+        self.assertEqual(
+            [s["name"] for s in teela],
+            ["bot_browser", "desk_team", "bot_desktop", "bot_memory", "chrome-devtools"],
+        )
+        self.assertEqual(teela[-1]["command"], "/home/roni/bin/npx")
+
+    def test_write_child_config_inherits_user_mcp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = Path(tmp.name)
+        servers = {
+            "chrome-devtools": {
+                "command": "/home/roni/bin/npx",
+                "args": ["-y", "chrome-devtools-mcp@latest", "--isolated"],
+                "enabled": True,
+                "startup_timeout_sec": 120,
+                "env": {"DISPLAY": ":0", "PATH": "/home/roni/bin"},
+            }
+        }
+        catalog = {
+            "grok-4.6": {
+                "model": "grok-4.6",
+                "name": "Grok 4.6",
+                "api_backend": "responses",
+                "context_window": 500000,
+            }
+        }
+        with patch.object(d, "load_user_mcp_servers", return_value=servers):
+            d.write_child_config(home, "grok-4.6", catalog, inherit_mcp=True)
+            skipped = Path(tmp.name) / "skip"
+            d.write_child_config(skipped, "grok-4.6", catalog, inherit_mcp=False)
+        text = (home / "config.toml").read_text(encoding="utf-8")
+        self.assertIn("[mcp_servers.chrome-devtools]", text)
+        self.assertIn("chrome-devtools-mcp@latest", text)
+        self.assertIn("startup_timeout_sec = 120", text)
+        self.assertIn("[mcp_servers.chrome-devtools.env]", text)
+        self.assertIn('DISPLAY = ":0"', text)
+        skip_text = (skipped / "config.toml").read_text(encoding="utf-8")
+        self.assertNotIn("mcp_servers", skip_text)
 
     def test_grok_build_session_meta_is_yolo_only(self) -> None:
         meta = d.acp_session_meta(_KindBot("grok-build"))

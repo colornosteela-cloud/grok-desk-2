@@ -243,11 +243,14 @@ def generation_metrics(
     # Decode speed is first visible token → last visible token.
     # Full wall includes prefill/thinking and under-reports tok/s on local Qwen.
     # ACP sometimes dumps the whole completion in one short burst after a long wait;
-    # treat that burst as implausible GPU decode and fall back to time after first token.
+    # treat a short-span burst as implausible GPU decode and fall back to time after
+    # first token. Long fast streams (>= 1s) are plausible and keep their rate.
     stream_tps = None
     if chunk_ms and chunk_ms > 0 and output_tokens:
         stream_tps = float(output_tokens) / (chunk_ms / 1000.0)
-    implausible_burst = bool(stream_tps is not None and stream_tps > 150)
+    implausible_burst = bool(
+        stream_tps is not None and stream_tps > 150 and (chunk_ms or 0.0) < 1000.0
+    )
 
     gen_ms: float | None = None
     speed_source = ""
@@ -286,6 +289,50 @@ def generation_metrics(
         "api_duration_ms": api_duration_ms,
         "model_calls": model_calls,
     }
+
+
+class LocalStreamSpeed:
+    """Decode speed for local-engine SSE streams (real per-token timing).
+
+    ACP chunk timing for local models is batched (one snapshot per model call),
+    so tok/s must come from the proxy path that sees every token delta.
+    """
+
+    MIN_SPAN_S = 0.4
+    LIVE_MIN_SPAN_S = 1.0
+    LIVE_PERIOD_S = 1.0
+
+    def __init__(self) -> None:
+        self.first_t: float | None = None
+        self.last_t: float | None = None
+        self.tokens = 0
+        self._last_live_t: float | None = None
+
+    def record(self, token_count: int, t: float) -> float | None:
+        """Note a token delta at wall time t. Returns a live tok/s when due."""
+        n = int(token_count or 0)
+        if n <= 0:
+            return None
+        if self.first_t is None:
+            self.first_t = t
+        self.last_t = t
+        self.tokens += n
+        span = t - self.first_t
+        if span < self.LIVE_MIN_SPAN_S:
+            return None
+        if self._last_live_t is not None and (t - self._last_live_t) < self.LIVE_PERIOD_S:
+            return None
+        self._last_live_t = t
+        return float(self.tokens) / span
+
+    def final(self) -> float | None:
+        """Decode tok/s over first → last token, or None when the span is too short."""
+        if self.first_t is None or self.last_t is None or self.tokens < 2:
+            return None
+        span = float(self.last_t) - float(self.first_t)
+        if span < self.MIN_SPAN_S:
+            return None
+        return float(self.tokens) / span
 
 
 def _as_int(value: Any) -> int | None:

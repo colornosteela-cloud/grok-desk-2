@@ -117,6 +117,39 @@ class MiniOSWorkspaceTests(unittest.TestCase):
             d.bots.pop(self.bot.id, None)
             d.bots.pop(other.id, None)
 
+    def test_prefill_progress_is_tui_line_not_thought(self) -> None:
+        class _FakeBot:
+            id = "b_gb"
+            kind = "grok-build"
+            status = "Ready"
+            surface = "chat"
+            control = "agent_controlled"
+            acp = None
+            _prefill_stop = None
+
+        events: list = []
+        real_emit = d.emit
+        d.emit = lambda ev: events.append(ev)
+        try:
+            bot = _FakeBot()
+            d.start_local_prefill_progress(bot, 100)
+            try:
+                kinds = [
+                    e.get("update", {}).get("sessionUpdate")
+                    for e in events
+                    if e.get("type") == "session.update"
+                ]
+                self.assertIn("agent_progress", kinds)
+                self.assertNotIn("agent_thought_chunk", kinds, "prefill wait must not create a Thought block")
+                prog = next(e for e in events if e.get("type") == "session.update")
+                self.assertIn("Reading the local-model prompt (100 tokens)", prog["update"]["content"]["text"])
+                statuses = [e.get("text") for e in events if e.get("type") == "status"]
+                self.assertEqual(statuses[0], "Thinking…")
+            finally:
+                d.stop_local_prefill_progress(bot)
+        finally:
+            d.emit = real_emit
+
     def test_detect_node_dev_system(self) -> None:
         (self.workspace / "package.json").write_text(
             json.dumps({"scripts": {"build": "vite build", "test": "vitest run", "dev": "vite"}}),
@@ -1597,10 +1630,131 @@ await retry;
         self.assertIn(".gb-tool.is-failed", self.css)
         self.assertIn("Same tools, answers, and transcript as a regular grok TUI session", self.index)
 
+    def test_grok_build_tui_parity_progress_todos_workflow_effort(self) -> None:
+        # TUI-style transient progress line: the local-model prefill wait is a
+        # dim progress line that updates in place, never a "Thought 1ms" block.
+        self.assertIn("function renderProgressLine", self.app)
+        self.assertIn('role === "progress"', self.app)
+        self.assertIn('"agent_progress"', self.app)
+        self.assertIn('if (b.messages[i].role === "progress") b.messages.splice(i, 1);', self.app)
+        self.assertIn("def emit_local_progress", self.deskd)
+        self.assertIn('"sessionUpdate": "agent_progress"', self.deskd)
+        prefill = self.deskd.split("def start_local_prefill_progress", 1)[1].split("threading.Thread(target=tick", 1)[0]
+        self.assertIn("bot_kind_is_grok_build(bot)", prefill)
+        self.assertIn("emit_local_progress", prefill)
+        self.assertIn('emit_local_activity(bot, "Thinking…")', prefill)
+        self.assertIn("Reading the local-model prompt", prefill)
+        self.assertNotIn("agent_thought_chunk", prefill)
+        self.assertIn("emit_local_progress(bot, \"\")", self.deskd)
+        # TUI-style live task list for todo_write.
+        self.assertIn("function todosFromUpdate", self.app)
+        self.assertIn("function renderTodoBlock", self.app)
+        self.assertIn("found.isTodos = true", self.app)
+        self.assertIn("m.isTodos && (m.todos || []).length", self.app)
+        self.assertIn(".gb-todo", self.grokbot_css)
+        self.assertIn(".todo-row", self.grokbot_css)
+        self.assertIn(".todo-row.st-in_progress", self.grokbot_css)
+        # Subagent / workflow progress.
+        self.assertIn('if (/spawn_subagent/.test(name)) return "Subagent";', self.app)
+        self.assertIn('if (name === "workflow") return "Workflow";', self.app)
+        self.assertIn("function trackWorkflowRun", self.app)
+        self.assertIn("b.workflow_runs = b.workflow_runs || []", self.app)
+        # TUI status line: reasoning effort shown for Grok Build bots only.
+        self.assertIn('id="effort-chip"', self.index)
+        self.assertIn('b.kind === "grok-build" ? currentEffort(b) : ""', self.app)
+        self.assertIn(".effort-chip[hidden]", self.grokbot_css)
+        self.assertIn(".gb-progress", self.grokbot_css)
+
     def test_chat_stays_pinned_to_latest(self) -> None:
         self.assertIn("function stickTranscript", self.app)
         self.assertIn("chatStickBottom", self.app)
         self.assertIn("margin-top: auto", self.css)
+
+    def test_assistant_stream_restart_does_not_duplicate(self) -> None:
+        self.assertIn("function collapseRestartedAssistant", self.app)
+        self.assertIn("STREAM_RESTART_HEAD", self.app)
+        self.assertIn("def collapse_restarted_assistant", self.deskd)
+        self.run_frontend_node(r'''
+load('const STREAM_RESTART_HEAD', 'function mdInline(');
+const head = "Here's the honest, system-specific breakdown — what each one actually buys you on grok-desk, and where the real value (and risk) is.\n";
+const truncated = head + "Chrome DevTools — adopt now.\nthen copy the good ones into the";
+const full = truncated + " skills directory and watch. Telescope first.";
+const merged = mergeAssistantStream(truncated, "\n" + full);
+assert.equal((merged.match(/Here's the honest/g) || []).length, 1);
+assert.ok(merged.includes("Telescope first."));
+const glued = truncated + "\n" + full;
+assert.equal(collapseRestartedAssistant(glued), full);
+''')
+
+    def test_grok_build_tui_parity_behavior(self) -> None:
+        self.run_frontend_node(r'''
+load('function escapeHtml(', 'function mergeAssistantStream(');
+load('function mergeAssistantStream(', 'function mdInline(');
+load('const TOOL_OUTPUT_MAX', 'function toolLabel(');
+load('function bindFold(', 'function renderWorked(');
+load('function renderProgressLine(', 'function planEntriesFromUpdate(');
+load('function planEntriesFromUpdate(', 'function renderHorizon(');
+globalThis.setWorking = (id, on) => { state.working[id] = !!on; };
+const makeEl = () => {
+  const classes = new Set();
+  return { value: '', style: {}, dataset: {}, listeners: {},
+    classList: { add: x => classes.add(x), remove: x => classes.delete(x), contains: x => classes.has(x) },
+    setAttribute() {}, addEventListener() {}, open: false };
+};
+document.createElement = makeEl;
+const b = { id: 'gb1', kind: 'grok-build', messages: [] };
+// Prefill wait: one progress line that updates in place, cleared when tokens start.
+applySessionTurn(b, { sessionUpdate: 'agent_progress', content: { text: 'Reading the local-model prompt (23,425 tokens). First token waits on GPU prefill…' } });
+assert.equal(b.messages.length, 1);
+assert.equal(b.messages[0].role, 'progress');
+assert.ok(!b.messages.some((m) => m.role === 'thought'), 'prefill wait must not create a Thought block');
+applySessionTurn(b, { sessionUpdate: 'agent_progress', content: { text: 'Reading the local-model prompt (23,425 tokens)… 42%' } });
+assert.equal(b.messages.length, 1, 'progress line updates in place');
+assert.match(b.messages[0].text, /42%/);
+const line = renderProgressLine(b.messages[0]);
+assert.equal(line.className, 'gb-progress');
+assert.match(line.textContent, /23,425/);
+applySessionTurn(b, { sessionUpdate: 'agent_progress', content: { text: '' } });
+assert.equal(b.messages.length, 0, 'first token clears the progress line');
+// todo_write: TUI-style live task list.
+applySessionTurn(b, {
+  sessionUpdate: 'tool_call', toolCallId: 'todo-1', title: 'todo_write', status: 'in_progress',
+  _meta: { 'x.ai/tool': { name: 'todo_write', label: 'Todo', kind: 'other', input: { todos: [
+    { id: 'a', content: 'Study code', status: 'completed' },
+    { id: 'b', content: 'Implement', status: 'in_progress' },
+    { id: 'c', content: 'Verify', status: 'pending' } ] } } },
+});
+const t = b.messages[b.messages.length - 1];
+assert.equal(t.role, 'tool');
+assert.equal(t.isTodos, true);
+assert.equal(t.todos.length, 3);
+const block = renderTodoBlock(t, 0);
+assert.match(block.innerHTML, /Tasks/);
+assert.match(block.innerHTML, /1\/3 done/);
+assert.ok(block.innerHTML.includes('✓') && block.innerHTML.includes('▶') && block.innerHTML.includes('Verify'));
+applySessionTurn(b, {
+  sessionUpdate: 'tool_call_update', toolCallId: 'todo-1', status: 'completed',
+  _meta: { 'x.ai/tool': { name: 'todo_write', input: { todos: [
+    { id: 'a', content: 'Study code', status: 'completed' },
+    { id: 'b', content: 'Implement', status: 'completed' },
+    { id: 'c', content: 'Verify', status: 'in_progress' } ] } } },
+});
+assert.equal(t.status, 'completed');
+assert.equal(t.todos[1].status, 'completed');
+assert.match(renderTodoBlock(t, 0).innerHTML, /2\/3 done/);
+// workflow: session runs tracked for /workflow runs.
+applySessionTurn(b, {
+  sessionUpdate: 'tool_call', toolCallId: 'wf-1', title: 'workflow', status: 'in_progress',
+  _meta: { 'x.ai/tool': { name: 'workflow', label: 'Workflow', input: { source: { type: 'name', name: 'deep-research' } } } },
+});
+assert.equal(b.workflow_runs.length, 1);
+assert.equal(b.workflow_runs[0].name, 'deep-research');
+assert.equal(b.workflow_runs[0].phase, 'running');
+// Turn completion clears any leftover progress line.
+applySessionTurn(b, { sessionUpdate: 'agent_progress', content: { text: 'prefill 10%' } });
+applySessionTurn(b, { sessionUpdate: 'turn_completed', stop_reason: 'end_turn', elapsed_ms: 1234 });
+assert.ok(!b.messages.some((m) => m.role === 'progress'));
+''')
 
     def test_pasted_chat_images_are_not_duplicated(self) -> None:
         self.assertIn("function mergeChatImages", self.app)

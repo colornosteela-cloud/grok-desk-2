@@ -586,6 +586,38 @@ button { color:inherit; }
 }
 .gb-out { color:#c5ccd4; max-height:220px; }
 .gb-worked { color:var(--muted); font-size:11px; margin:0 0 16px; }
+.gb-progress {
+  max-width:min(92%, 780px);
+  margin:2px 0 8px;
+  padding:3px 10px;
+  font:12px/1.5 "Ubuntu Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color:var(--muted);
+  border-left:2px solid color-mix(in srgb, #4aa3ff, transparent 55%);
+}
+.gb-progress:empty { display:none; }
+.gb-todo { --gb-accent:#4aa3ff; }
+.gb-todo.is-running { --gb-accent:#e6a817; }
+.todo-row { display:flex; gap:8px; padding:1px 0; white-space:normal; }
+.todo-mark { flex:0 0 auto; width:1.25em; text-align:center; }
+.todo-text { min-width:0; overflow-wrap:anywhere; }
+.todo-row.st-completed .todo-mark, .todo-row.st-done .todo-mark { color:#2bb673; }
+.todo-row.st-completed .todo-text, .todo-row.st-done .todo-text { color:var(--muted); }
+.todo-row.st-in_progress .todo-mark, .todo-row.st-in_progress .todo-text { color:var(--text); }
+.todo-row.st-in_progress .todo-text { font-weight:650; }
+.todo-row.st-cancelled .todo-text { text-decoration:line-through; color:var(--muted); }
+.effort-chip {
+  height:29px;
+  display:inline-flex;
+  align-items:center;
+  border:1px solid var(--line);
+  background:var(--panel);
+  color:var(--muted);
+  border-radius:9px;
+  padding:0 9px;
+  font-size:11px;
+  white-space:nowrap;
+}
+.effort-chip[hidden] { display:none; }
 .typing {
   display:inline-flex; gap:4px; align-items:center;
 }

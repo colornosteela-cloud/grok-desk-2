@@ -311,6 +311,33 @@ class StreamMergeTests(unittest.TestCase):
         incoming = "Teela and more"
         self.assertEqual(d.merge_assistant_stream(cur, incoming), "the name is Teela and more")
 
+    def test_leading_newline_snapshot_does_not_duplicate(self) -> None:
+        head = (
+            "Here's the honest, system-specific breakdown — what each one actually buys you "
+            "on grok-desk, and where the real value (and risk) is.\n"
+        )
+        truncated = head + "Chrome DevTools — adopt now.\nthen copy the good ones into the"
+        full = truncated + " skills directory and watch. Telescope first."
+        out = d.merge_assistant_stream(truncated, "\n" + full)
+        self.assertEqual(out.count("Here's the honest"), 1)
+        self.assertIn("Telescope first.", out)
+        self.assertTrue(out.endswith("Telescope first."))
+
+    def test_restarted_essay_collapses_to_the_complete_copy(self) -> None:
+        head = (
+            "Here's the honest, system-specific breakdown — what each one actually buys you "
+            "on grok-desk, and where the real value (and risk) is.\n"
+        )
+        first = head + "Chrome DevTools — adopt now.\nthen copy the good ones into the"
+        second = head + (
+            "Chrome DevTools — adopt now.\nthen copy the good ones into the "
+            "skills directory and watch. Telescope first."
+        )
+        glued = first + "\n" + second
+        out = d.collapse_restarted_assistant(glued)
+        self.assertEqual(out.count("Here's the honest"), 1)
+        self.assertEqual(out, second)
+
 
 class AvatarPersistTests(unittest.TestCase):
     def test_body_payload_color_and_shape(self) -> None:

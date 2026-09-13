@@ -259,22 +259,51 @@ function stripAssistantPadding(text) {
   return stripChatterboxTags(String(text ?? "")).replace(/^[\n\r]+/, "");
 }
 
+const STREAM_RESTART_HEAD = 80;
+
+function collapseRestartedAssistant(text, headN) {
+  text = String(text ?? "");
+  const n = headN || STREAM_RESTART_HEAD;
+  if (text.length < n * 2) return text;
+  const head = text.slice(0, n);
+  const pos = text.indexOf(head, n);
+  if (pos < 0) return text;
+  const first = text.slice(0, pos);
+  const second = text.slice(pos);
+  let lcp = 0;
+  const lim = Math.min(first.length, second.length);
+  while (lcp < lim && first[lcp] === second[lcp]) lcp += 1;
+  if (lcp < n) return text;
+  return second.length >= first.length ? second : first;
+}
+
 function mergeAssistantStream(cur, incoming) {
   cur = String(cur ?? "");
   incoming = String(incoming ?? "");
-  if (!incoming) return cur;
+  if (!incoming) return collapseRestartedAssistant(cur);
   if (!cur) return incoming;
-  if (incoming === cur) return cur;
-  if (incoming.startsWith(cur)) return incoming;
+  const inc = incoming.replace(/^[\n\r]+/, "") || incoming;
+  if (incoming === cur || inc === cur) return cur;
+  if (incoming.startsWith(cur)) return collapseRestartedAssistant(incoming);
+  if (inc.startsWith(cur)) return collapseRestartedAssistant(inc);
   if (cur.startsWith(incoming) && incoming.length >= Math.min(32, cur.length)) return cur;
-  const max = Math.min(cur.length, incoming.length);
-  // Token deltas often share 1–2 letters ("Te"+"ela"). Collapsing that
-  // overlap turns Teela into Tela. Only merge a resent tail window.
-  const minOverlap = 8;
-  for (let k = max; k >= minOverlap; k--) {
-    if (cur.endsWith(incoming.slice(0, k))) return cur + incoming.slice(k);
+  if (cur.startsWith(inc) && inc.length >= Math.min(32, cur.length)) return cur;
+  if (cur.length >= 64 && inc.includes(cur)) return collapseRestartedAssistant(inc);
+  if (inc.length >= 64 && cur.includes(inc)) return cur;
+  let lcp = 0;
+  const lim = Math.min(cur.length, inc.length);
+  while (lcp < lim && cur[lcp] === inc[lcp]) lcp += 1;
+  if (lcp >= STREAM_RESTART_HEAD) {
+    return collapseRestartedAssistant(inc.length >= cur.length ? inc : cur);
   }
-  return cur + incoming;
+  const minOverlap = 8;
+  for (const src of [incoming, inc]) {
+    const max = Math.min(cur.length, src.length);
+    for (let k = max; k >= minOverlap; k--) {
+      if (cur.endsWith(src.slice(0, k))) return collapseRestartedAssistant(cur + src.slice(k));
+    }
+  }
+  return collapseRestartedAssistant(cur + incoming);
 }
 
 function mdInline(s) {
@@ -897,6 +926,52 @@ function toolCommandFromUpdate(u) {
   return loc?.path ? String(loc.path) : "";
 }
 
+function todosFromUpdate(u) {
+  const meta = u?._meta?.["x.ai/tool"] || {};
+  const bags = [meta.input, u?.rawInput, u?.input].filter((b) => b && typeof b === "object");
+  for (const bag of bags) {
+    if (!Array.isArray(bag.todos)) continue;
+    const rows = bag.todos
+      .map((t) => ({
+        id: String(t?.id || ""),
+        content: String(t?.content || "").trim(),
+        status: String(t?.status || "pending").toLowerCase().replace(/[\s-]+/g, "_"),
+      }))
+      .filter((t) => t.content);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
+const WORKFLOW_RUN_LIMIT = 24;
+
+function trackWorkflowRun(b, found, meta, u) {
+  const inp = (meta?.input && typeof meta.input === "object" && meta.input) || u?.rawInput || u?.input || {};
+  const src = inp?.source;
+  let runName = "";
+  if (src && typeof src === "object") {
+    runName = String(src.name || "").trim();
+    if (!runName && src.script_path) runName = String(src.script_path).split("/").pop().replace(/\.rhai$/i, "");
+  } else if (typeof src === "string") {
+    runName = src.trim();
+  }
+  if (!runName) {
+    runName = String(found.title || found.detail || "workflow").replace(/^workflow\s*/i, "").trim() || "workflow";
+  }
+  const phase =
+    { pending: "running", in_progress: "running", running: "running", completed: "completed", failed: "failed", cancelled: "cancelled" }[found.status] ||
+    "running";
+  b.workflow_runs = b.workflow_runs || [];
+  let run = b.workflow_runs.find((r) => r.name === runName);
+  if (!run) {
+    run = { name: runName, hint: String(inp?.description || meta?.label || "Session run"), phase };
+    b.workflow_runs.push(run);
+    if (b.workflow_runs.length > WORKFLOW_RUN_LIMIT) b.workflow_runs.shift();
+  } else {
+    run.phase = phase;
+  }
+}
+
 function toolLabel(m) {
   const kind = String(m.kind || "").toLowerCase();
   const name = String(m.name || m.title || m.text || "").toLowerCase();
@@ -908,6 +983,9 @@ function toolLabel(m) {
   if (/search_tool/.test(name)) return "Search";
   if (/web_search/.test(name)) return "Web Search";
   if (/glob|list_dir/.test(name)) return "Glob";
+  if (/spawn_subagent/.test(name)) return "Subagent";
+  if (/kill_command_or_subagent/.test(name)) return "Stop Task";
+  if (name === "workflow") return "Workflow";
   if (/use_tool/.test(name)) {
     const inner = detail.replace(/^bot_desktop__/, "").replace(/^mcp__/, "");
     if (inner && inner !== "use_tool") return inner.replace(/_/g, " ");
@@ -983,7 +1061,25 @@ function renderThoughtBlock(m, idx) {
   return el;
 }
 
+const TODO_MARKS = { completed: "✓", done: "✓", in_progress: "▶", pending: "☐", cancelled: "✕" };
+
+function renderTodoBlock(m, idx) {
+  const rows = m.todos || [];
+  const done = rows.filter((t) => t.status === "completed" || t.status === "done").length;
+  const status = m.status || (m.open ? "running" : "completed");
+  const running = status === "running" || (m.open && status !== "completed" && status !== "cancelled");
+  const el = document.createElement("details");
+  el.className = "gb-block gb-todo" + (running ? " is-running" : "");
+  el.dataset.fold = `todo-${idx}`;
+  el.innerHTML = `<summary><span class="gb-accent"></span><span class="gb-label">Tasks</span><span class="gb-sub">${done}/${rows.length} done</span></summary>
+    <div class="gb-block-body">${rows.map((t) => `<div class="todo-row st-${escapeHtml(t.status)}"><span class="todo-mark">${TODO_MARKS[t.status] || "☐"}</span><span class="todo-text">${escapeHtml(t.content)}</span></div>`).join("")}</div>`;
+  bindFold(el, m);
+  if (running && m.expanded !== false) el.open = true;
+  return el;
+}
+
 function renderToolBlock(m, idx) {
+  if (m.isTodos && (m.todos || []).length) return renderTodoBlock(m, idx);
   const status = m.status || (m.open ? "running" : "completed");
   const running = status === "running" || (m.open && status !== "completed" && status !== "cancelled");
   const failed = status === "failed";
@@ -1008,10 +1104,34 @@ function renderWorked(ms) {
   return el;
 }
 
+function renderProgressLine(m) {
+  const el = document.createElement("div");
+  el.className = "gb-progress";
+  el.setAttribute("aria-live", "polite");
+  el.textContent = String(m.text || "");
+  return el;
+}
+
+function lastProgressIndex(b) {
+  const ms = b.messages || [];
+  for (let i = ms.length - 1; i >= 0; i--) if (ms[i].role === "progress") return i;
+  return -1;
+}
+
 function applySessionTurn(b, u) {
   const kind = u.sessionUpdate;
   const text = u.content?.text || "";
   b.messages = b.messages || [];
+  if (kind === "agent_progress") {
+    const pi = lastProgressIndex(b);
+    if (!text) {
+      if (pi >= 0) b.messages.splice(pi, 1);
+      return true;
+    }
+    if (pi >= 0) b.messages[pi].text = text;
+    else b.messages.push({ role: "progress", text, ts: Date.now() / 1000 });
+    return true;
+  }
   if (kind === "agent_thought_chunk" && text) {
     const last = b.messages[b.messages.length - 1];
     if (last && last.role === "thought" && last.open) {
@@ -1061,6 +1181,12 @@ function applySessionTurn(b, u) {
     }
     const output = toolOutputFromUpdate(u);
     if (output) found.output = output;
+    const todos = todosFromUpdate(u);
+    if (todos.length) {
+      found.todos = todos;
+      found.isTodos = true;
+    }
+    if (name === "workflow") trackWorkflowRun(b, found, meta, u);
     if (["completed", "cancelled"].includes(found.status)) found.open = false;
     else if (found.status === "failed") found.open = true;
     window.DeskUI?.setEmotion(b.id, "working", { persist: false, pop: true });
@@ -1080,9 +1206,12 @@ function applySessionTurn(b, u) {
   }
   if (kind === "turn_completed" || kind === "response_completed") {
     const elapsed = u.elapsed_ms ?? u.usage?.apiDurationMs;
+    for (let i = b.messages.length - 1; i >= 0; i--) {
+      if (b.messages[i].role === "progress") b.messages.splice(i, 1);
+    }
     const last = b.messages[b.messages.length - 1];
     if (text && last && last.role === "assistant") {
-      last.text = text;
+      last.text = collapseRestartedAssistant(text);
     }
     if (last && last.open) last.open = false;
     if (elapsed != null && elapsed > 0) {
@@ -1679,6 +1808,10 @@ function renderConversation(b) {
   t.appendChild(clock);
   const msgs = b.messages || [];
   msgs.forEach((m, idx) => {
+    if (m.role === "progress") {
+      t.appendChild(renderProgressLine(m));
+      return;
+    }
     if (m.role === "thought") {
       t.appendChild(renderThoughtBlock(m, idx));
       if (m.elapsed_ms && msgs[idx + 1]?.role === "user") t.appendChild(renderWorked(m.elapsed_ms));
@@ -1694,7 +1827,7 @@ function renderConversation(b) {
       return;
     }
     const text = m.role === "assistant"
-      ? stripAssistantPadding(m.text)
+      ? stripAssistantPadding(collapseRestartedAssistant(m.text))
       : m.role === "user"
         ? visibleUserText(m.text)
         : m.text;
@@ -1814,8 +1947,13 @@ function mergeChatImages(prev, next) {
   return out;
 }
 
+// Mirror of deskd._SAVED_MEDIA_LINE / visible_user_text: the collapse only
+// runs when a media line is actually removed, so pasted spacing round-trips.
+const SAVED_MEDIA_LINE_RE = /^(?:The user pasted \d+ (?:image|video|file)s? into chat\.|Saved to (?:Pictures|Videos|Desktop)\/[^\n]*)$/m;
 function visibleUserText(text) {
-  return String(text || "")
+  const out = String(text || "").trim();
+  if (!SAVED_MEDIA_LINE_RE.test(out)) return out;
+  return out
     .replace(/^The user pasted \d+ (?:image|video|file)s? into chat\.\s*/gim, "")
     .replace(/(?:^|\n)Saved to (?:Pictures|Videos|Desktop)\/[^\n]*/g, "")
     .replace(/\n{3,}/g, "\n\n")
@@ -1912,6 +2050,13 @@ function renderMeta(b) {
   }
   if (bar) bar.hidden = false;
   if ($("meta-model")) $("meta-model").textContent = `${modelLabel(b)} ▴`;
+  const effortChip = $("effort-chip");
+  if (effortChip) {
+    const eff = b.kind === "grok-build" ? currentEffort(b) : "";
+    const show = !!(eff && eff !== "off");
+    effortChip.hidden = !show;
+    effortChip.textContent = show ? `thinking ${eff}` : "";
+  }
   const used = Number(b.context_used) || 0;
   const max = Number(b.context_window) || 0;
   const pct = Math.min(100, Math.max(0, max > 0 && Number.isFinite(used) ? (used / max) * 100 : 0));
@@ -2166,7 +2311,6 @@ async function applyBotModel(b, id, effort) {
       await controlLocalLlm("start", id, b);
     }
   }
-  const prev = b.model;
   const body = { model: id };
   if (effort) body.effort = String(effort).toLowerCase();
   const j = await api(`/v1/bots/${b.id}/model`, {
@@ -2180,7 +2324,8 @@ async function applyBotModel(b, id, effort) {
   else if (effort) b.effort = String(effort).toLowerCase();
   const chosen = (b.models || []).find((x) => x.id === b.model);
   if (chosen?.context_window) b.context_window = chosen.context_window;
-  if (b.model !== prev) b.context_used = 0;
+  // context_used is kept: the desk re-seeds it from runtime session files and
+  // pushes the value over the usage channel (TUI keeps last known context too).
   renderMeta(b);
   requestAnimationFrame(fitTerms);
   setTimeout(fitTerms, 120);
@@ -6135,11 +6280,15 @@ $("composer").addEventListener("submit", async (e) => {
     b.messages = b.messages || [];
     const pics = images.filter((i) => i.kind !== "video");
     const clips = images.filter((i) => i.kind === "video");
+    // echoPending: the deskd prompt handler re-broadcasts this message over WS
+    // (normalized via visible_user_text). The chat handler consumes that echo
+    // instead of appending a second bubble.
     b.messages.push({
       role: "user",
       text: text || (pics.length ? "(image)" : "(attachment)"),
       images: pics.map((i) => ({ path: null, preview: i.url || `data:${i.mime};base64,${i.data}` })),
       attachments: clips.map((i) => ({ type: i.mime, url: i.url, name: i.name })),
+      echoPending: true,
     });
     chatStickBottom = true;
     renderConversation(b);
@@ -6291,7 +6440,6 @@ window.deskClearChat = async (id) => {
     if (live) {
       live.messages = [];
       live.can_undo = false;
-      live.context_used = 0;
       if (state.selected === id) renderConversation(live);
     }
   }
@@ -7116,15 +7264,20 @@ function connectEvents() {
       b.messages = b.messages || [];
       if (kind === "agent_message_chunk" && text) {
         const last = b.messages[b.messages.length - 1];
-        if (last && last.role === "assistant" && last.open) {
+        const visible = stripAssistantPadding(text);
+        const head = (s) => String(s || "").slice(0, STREAM_RESTART_HEAD);
+        const sameReply = last && last.role === "assistant" && visible && (
+          last.open
+          || (last.text || "").startsWith(head(visible))
+          || visible.startsWith(head(last.text))
+        );
+        if (sameReply) {
           last.text = stripAssistantPadding(mergeAssistantStream(last.text || "", text));
-        } else {
-          const visible = stripAssistantPadding(text);
-          if (visible) {
-            if (last && last.open) last.open = false;
-            b.messages.push({ role: "assistant", text: visible, open: true });
-            window.DeskUI?.setEmotion(b.id, "speaking", { persist: false, pop: false });
-          }
+          last.open = true;
+        } else if (visible) {
+          if (last && last.open) last.open = false;
+          b.messages.push({ role: "assistant", text: visible, open: true });
+          window.DeskUI?.setEmotion(b.id, "speaking", { persist: false, pop: false });
         }
         document.querySelector(".tps-stat")?.classList.add("generating");
         renderConversation(b);
@@ -7205,6 +7358,25 @@ function connectEvents() {
           if (msg.images?.length) last.images = mergeChatImages(last.images, msg.images);
           if (msg.attachments?.length) last.attachments = msg.attachments;
           if (msg.role === "assistant") setWorking(b.id, false);
+          delete last.echoPending;
+          return;
+        }
+        // deskd re-broadcasts the user message normalized (visible_user_text
+        // collapses 3+ newlines and drops media-save lines). Adopt the echo as
+        // the authoritative text of our optimistic bubble instead of appending
+        // a second one.
+        const normEcho = (s) => visibleUserText(s).replace(/\n{3,}/g, "\n\n");
+        const ownEcho = msg.role === "user" && sameVia && last.echoPending
+          && (visibleUserText(last.text || "") === visibleUserText(msg.text || "")
+              || normEcho(last.text || "") === normEcho(msg.text || ""));
+        if (ownEcho) {
+          last.text = msg.text;
+          delete last.echoPending;
+          if (msg.images?.length) last.images = mergeChatImages(last.images, msg.images);
+          if (msg.attachments?.length) last.attachments = msg.attachments;
+          renderConversation(b);
+          if (state.timelineOpen) refreshTimeline();
+          else updateActiveChatMeta(b);
           return;
         }
         const optimisticPaste = msg.role === "user" && !last.via && !msg.via
