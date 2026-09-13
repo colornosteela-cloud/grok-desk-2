@@ -1785,8 +1785,7 @@ function renderConversation(b) {
   restoreFolds(t, folds);
   wrapChatZoom(t);
   bindTranscriptMedia(t);
-  if (pin || isWorking(b.id)) {
-    chatStickBottom = true;
+  if (pin) {
     stickTranscript(true);
   } else {
     t.scrollTop = Math.max(0, t.scrollHeight - fromBottom);
