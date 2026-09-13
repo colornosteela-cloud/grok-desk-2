@@ -36,6 +36,49 @@ def _wav_pcm16(seconds: float = 0.3, rate: int = 16000, freq: float = 440.0) -> 
     return hdr
 
 
+class TtsEmotionParameterTests(unittest.TestCase):
+    def test_tag_selects_cloned_voice_curve(self) -> None:
+        name, p = d.tts_emotion_params("[happy] Hello, I am Teela.")
+        self.assertEqual(name, "happy")
+        self.assertGreaterEqual(p["exaggeration"], 1.4)
+        self.assertLess(p["cfg_weight"], 0.2)
+        name, p = d.tts_emotion_params("[crying] I miss that.")
+        self.assertEqual(name, "sad")
+        self.assertLessEqual(p["exaggeration"], 0.05)
+        name, p = d.tts_emotion_params("[angry] Stop that.")
+        self.assertEqual(name, "angry")
+        self.assertGreaterEqual(p["exaggeration"], 1.5)
+        name, p = d.tts_emotion_params("Just the facts.")
+        self.assertEqual(name, "neutral")
+        self.assertGreater(p["exaggeration"], 0.2)
+        self.assertLess(p["exaggeration"], 0.7)
+        name, p = d.tts_emotion_params("[excited] Yes!")
+        self.assertEqual(name, "excited")
+        self.assertGreaterEqual(p["exaggeration"], 1.8)
+        self.assertEqual(d.apply_tts_emotion_tag("I'm glad you're here.", "happy"), "[happy] I'm glad you're here.")
+        self.assertEqual(d.apply_tts_emotion_tag("[angry] Stop.", "angry"), "[angry] Stop.")
+        self.assertTrue(d.apply_tts_emotion_tag("Waiting.", "sad").startswith("[crying]"))
+
+    def test_explicit_emotion_overrides_tags(self) -> None:
+        name, p = d.tts_emotion_params("[happy] Hey.", requested="tired")
+        self.assertEqual(name, "tired")
+        self.assertLessEqual(p["exaggeration"], 0.05)
+
+    def test_user_asked_voice_even_without_tag(self) -> None:
+        name, p = d.tts_emotion_params(
+            "I'm just so happy to be here with you!",
+            user_text="Can you tell me something in a happy voice?",
+        )
+        self.assertEqual(name, "happy")
+        self.assertGreaterEqual(p["exaggeration"], 1.4)
+        name, p = d.tts_emotion_params(
+            "Okay, so I finally found the screwdriver.",
+            user_text="tell me a short story about anything in a frustrated voice.",
+        )
+        self.assertEqual(name, "frustrated")
+        self.assertGreaterEqual(p["exaggeration"], 1.2)
+
+
 class VoiceUpstreamResolverTests(unittest.TestCase):
     def setUp(self) -> None:
         self._env = {k: os.environ.get(k) for k in (

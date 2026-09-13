@@ -416,6 +416,64 @@ CHATTERBOX_TAG_ALIASES = {
     "sush": "shush",
     "clear_throat": "clear throat",
     "clearthroat": "clear throat",
+    "excited": "happy",
+    "enthusiastic": "happy",
+    "frustrated": "angry",
+    "worried": "fear",
+}
+# Cloned-voice sampling for Jade. Pushed to the edges so each tag is audible.
+# Chatterbox exaggeration is 0–2; cfg_weight low = wilder, high = locked.
+TTS_EMOTION_PARAMETERS: dict[str, dict[str, float]] = {
+    "excited": {"exaggeration": 1.9, "cfg_weight": 0.08, "temperature": 1.55},
+    "happy": {"exaggeration": 1.55, "cfg_weight": 0.12, "temperature": 1.35},
+    "enthusiastic": {"exaggeration": 1.75, "cfg_weight": 0.1, "temperature": 1.45},
+    "sad": {"exaggeration": 0.02, "cfg_weight": 0.98, "temperature": 0.22},
+    "angry": {"exaggeration": 1.8, "cfg_weight": 0.08, "temperature": 1.4},
+    "frustrated": {"exaggeration": 1.4, "cfg_weight": 0.14, "temperature": 1.2},
+    "calm": {"exaggeration": 0.06, "cfg_weight": 0.94, "temperature": 0.26},
+    "neutral": {"exaggeration": 0.45, "cfg_weight": 0.55, "temperature": 0.65},
+    "confused": {"exaggeration": 0.55, "cfg_weight": 0.42, "temperature": 1.05},
+    "surprised": {"exaggeration": 1.7, "cfg_weight": 0.1, "temperature": 1.4},
+    "tired": {"exaggeration": 0.0, "cfg_weight": 1.0, "temperature": 0.16},
+    "worried": {"exaggeration": 0.22, "cfg_weight": 0.88, "temperature": 0.42},
+}
+# Official Turbo token forced onto TTS audio (chat text is unchanged).
+TTS_EMOTION_SPEAK_TAG = {
+    "excited": "happy",
+    "happy": "happy",
+    "enthusiastic": "happy",
+    "sad": "crying",
+    "angry": "angry",
+    "frustrated": "angry",
+    "calm": "whispering",
+    "surprised": "surprised",
+    "tired": "whispering",
+    "worried": "fear",
+    "confused": "surprised",
+}
+TTS_EMOTION_ALIASES = {
+    "crying": "sad",
+    "sad": "sad",
+    "fear": "worried",
+    "worried": "worried",
+    "surprise": "surprised",
+    "surprised": "surprised",
+    "happy": "happy",
+    "excited": "excited",
+    "enthusiastic": "enthusiastic",
+    "angry": "angry",
+    "frustrated": "frustrated",
+    "calm": "calm",
+    "whispering": "calm",
+    "whisper": "calm",
+    "tired": "tired",
+    "confused": "confused",
+    "neutral": "neutral",
+    "dramatic": "enthusiastic",
+    "sarcastic": "frustrated",
+    "gasp": "surprised",
+    "sigh": "sad",
+    "groan": "frustrated",
 }
 _CHATTERBOX_TAG_RE = re.compile(r"\[([^\[\]]+)\]")
 CHATTERBOX_VOICE_NOTE = (
@@ -425,6 +483,7 @@ CHATTERBOX_VOICE_NOTE = (
     "You may insert official square-bracket tags for Jade only. "
     "Most replies have no tags. Do not laugh, chuckle, or start with [happy] on ordinary chat "
     "(greetings, thanks, how are you, look/walk/wave, facts). "
+    "If they ask for a happy, sad, angry, excited, calm, or frustrated voice, start the spoken line with that tag. "
     "At most one style tag at the start, and only when the feeling is real: "
     "[happy] [surprised] [sarcastic] [dramatic] [whispering] [crying] [angry] [fear] [narration] [advertisement]. "
     "Sounds only when the moment needs them: [laugh] [chuckle] [gasp] [sigh] [cough] [groan] [sniff] [shush] [clear throat]. "
@@ -466,6 +525,52 @@ def voice_chat_active(bot: Any | None = None) -> bool:
     return bool(bot is not None and getattr(bot, "_voice_chat", False))
 
 
+def emotion_from_user_request(user_text: str) -> str:
+    """'in a happy voice' / 'frustrated tone' → emotion key. Empty if none."""
+    t = " ".join((user_text or "").lower().split())
+    if not t:
+        return ""
+    for key in TTS_EMOTION_PARAMETERS:
+        if re.search(
+            rf"\b{re.escape(key)}\b.{{0,28}}\b(?:voice|tone)\b|"
+            rf"\b(?:voice|tone)\b.{{0,20}}\b{re.escape(key)}\b",
+            t,
+        ):
+            return key
+    return ""
+
+
+def tts_emotion_params(text: str, requested: str = "", user_text: str = "") -> tuple[str, dict[str, float]]:
+    """Pick cloned-voice exaggeration/cfg/temperature from an explicit emotion or [tags]."""
+    want = TTS_EMOTION_ALIASES.get((requested or "").strip().lower(), (requested or "").strip().lower())
+    if want in TTS_EMOTION_PARAMETERS:
+        return want, dict(TTS_EMOTION_PARAMETERS[want])
+    for raw in _CHATTERBOX_TAG_RE.findall(text or ""):
+        raw_key = " ".join(str(raw or "").strip().lower().split())
+        key = TTS_EMOTION_ALIASES.get(raw_key, raw_key)
+        if key not in TTS_EMOTION_PARAMETERS:
+            name = normalize_chatterbox_tag(raw)
+            key = TTS_EMOTION_ALIASES.get(name, name)
+        if key in TTS_EMOTION_PARAMETERS:
+            return key, dict(TTS_EMOTION_PARAMETERS[key])
+    from_user = emotion_from_user_request(user_text)
+    if from_user in TTS_EMOTION_PARAMETERS:
+        return from_user, dict(TTS_EMOTION_PARAMETERS[from_user])
+    return "neutral", dict(TTS_EMOTION_PARAMETERS["neutral"])
+
+
+def apply_tts_emotion_tag(text: str, emotion: str) -> str:
+    """Put the matching Turbo token on the audio line so the clone actually shifts."""
+    tag = TTS_EMOTION_SPEAK_TAG.get((emotion or "").strip().lower())
+    if not tag:
+        return text or ""
+    out = text or ""
+    present = {normalize_chatterbox_tag(raw) for raw in _CHATTERBOX_TAG_RE.findall(out)}
+    if tag in present:
+        return out
+    return f"[{tag}] {out}".strip()
+
+
 def normalize_chatterbox_tag(raw: str) -> str:
     key = " ".join(str(raw or "").strip().lower().split())
     return CHATTERBOX_TAG_ALIASES.get(key, key)
@@ -499,6 +604,72 @@ def filter_unwarranted_laughs(text: str, user_text: str = "") -> str:
     return re.sub(r" {2,}", " ", out).strip()
 
 
+_SMALL_WORDS = (
+    "zero one two three four five six seven eight nine ten "
+    "eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen"
+).split()
+_TENS_WORDS = ("", "", "twenty", "thirty", "forty", "fifty")
+_CLOCK_AMPM_RE = re.compile(r"\b([0-2]?\d):([0-5]\d)\s*([AaPp])\.?[Mm]\.?\b")
+_CLOCK_BARE_RE = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
+_HOUR_AMPM_RE = re.compile(r"\b(1[0-2]|[1-9])\s*([AaPp])\.?[Mm]\.?\b")
+
+
+def _num_words(n: int) -> str:
+    n = int(n)
+    if 0 <= n < 20:
+        return _SMALL_WORDS[n]
+    if 20 <= n < 60:
+        tens, ones = divmod(n, 10)
+        if ones == 0:
+            return _TENS_WORDS[tens]
+        return f"{_TENS_WORDS[tens]} {_SMALL_WORDS[ones]}"
+    return str(n)
+
+
+def spoken_clock(hour: int, minute: int, meridiem: str | None = None) -> str:
+    """TTS-safe clock: 10:03 PM → 'ten oh three PM', not 'ten thousand three'."""
+    h = int(hour)
+    m = int(minute)
+    mer = (meridiem or "").lower().replace(".", "").strip()
+    if mer in {"am", "pm"}:
+        hour_w = _num_words(h % 12 or 12)
+        suffix = mer.upper()
+    elif h == 0:
+        hour_w, suffix = "twelve", "AM"
+    elif h == 12:
+        hour_w, suffix = "twelve", "PM"
+    elif h > 12:
+        hour_w, suffix = _num_words(h - 12), "PM"
+    else:
+        hour_w, suffix = _num_words(h), "AM"
+    if m == 0:
+        return f"{hour_w} {suffix}"
+    min_w = f"oh {_num_words(m)}" if m < 10 else _num_words(m)
+    return f"{hour_w} {min_w} {suffix}"
+
+
+def tts_friendly_times(text: str) -> str:
+    """Rewrite 10:03 PM / 22:03 so TTS cannot read them as ten-thousand-three."""
+
+    def with_mer(m: re.Match[str]) -> str:
+        h, mi = int(m.group(1)), int(m.group(2))
+        if h > 23:
+            return m.group(0)
+        mer = "PM" if m.group(3).lower() == "p" else "AM"
+        return spoken_clock(h % 12 or 12, mi, mer)
+
+    def bare(m: re.Match[str]) -> str:
+        return spoken_clock(int(m.group(1)), int(m.group(2)))
+
+    def hour_only(m: re.Match[str]) -> str:
+        mer = "PM" if m.group(2).lower() == "p" else "AM"
+        return spoken_clock(int(m.group(1)), 0, mer)
+
+    out = _CLOCK_AMPM_RE.sub(with_mer, text or "")
+    out = _CLOCK_BARE_RE.sub(bare, out)
+    return _HOUR_AMPM_RE.sub(hour_only, out)
+
+
 def sanitize_chatterbox_text(text: str, user_text: str = "") -> str:
     """Keep official Turbo tags; drop unknown [brackets] so they are not read aloud."""
 
@@ -509,6 +680,7 @@ def sanitize_chatterbox_text(text: str, user_text: str = "") -> str:
         return ""
 
     out = _CHATTERBOX_TAG_RE.sub(repl, text or "")
+    out = tts_friendly_times(out)
     out = re.sub(r" {2,}", " ", out).strip()
     return filter_unwarranted_laughs(out, user_text)
 
@@ -3220,8 +3392,13 @@ _SHORT_CHAT = (
     "Talk like a person in the room, one or two sentences. "
     "Answer what they just said first. "
     "You know your own body from proprioception; mention posture only if they asked how you feel or look, or you just moved. "
+    "You know what time it is from the NOW block — greet for morning/afternoon/evening/night, "
+    "and use how long you have been waving or walking when that matters. "
+    "When you say the time, write spoken words (ten oh three PM), never 10:03. "
+    "Do not read the clock aloud unless they asked the time or it is part of the reply. "
     "Never list joint names or degrees unless they asked."
 )
+_NOW_MARK = "[[teela-now]]"
 _SENSE_SECTION = re.compile(r"\n*\[\[minios-body-sense\]\].*$", re.DOTALL)
 _WORK_RE = re.compile(
     r"\b(?:"
@@ -3889,6 +4066,61 @@ def proprioception_block(
     )
 
 
+def _local_now(when: datetime | None = None) -> datetime:
+    if when is None:
+        return datetime.now().astimezone()
+    if when.tzinfo is None:
+        return when.replace(tzinfo=datetime.now().astimezone().tzinfo)
+    return when.astimezone()
+
+
+def _part_of_day(hour: int) -> str:
+    if 5 <= hour < 12:
+        return "morning"
+    if 12 <= hour < 17:
+        return "afternoon"
+    if 17 <= hour < 22:
+        return "evening"
+    return "night"
+
+
+def _human_clock(dt: datetime) -> str:
+    mer = "AM" if dt.hour < 12 else "PM"
+    spoken = spoken_clock(dt.hour % 12 or 12, dt.minute, mer)
+    return f"{dt.strftime('%A')}, {dt.strftime('%B')} {dt.day}, {dt.year}, {spoken}"
+
+
+def teela_now_block(bot: Any | None = None, *, when: datetime | None = None) -> str:
+    """Clock sense for this thought: local time of day plus how long the current move has lasted."""
+    dt = _local_now(when)
+    tz = dt.tzname() or dt.strftime("%Z") or "local"
+    part = _part_of_day(dt.hour)
+    held = ""
+    st = getattr(bot, "robot_state", None) if bot is not None else None
+    if isinstance(st, dict):
+        hist = [e for e in (st.get("history") or []) if isinstance(e, dict)]
+        last = hist[-1] if hist else None
+        motion = str(st.get("motion") or "idle")
+        pose = str(st.get("pose") or "home")
+        if last and last.get("t") is not None:
+            ago = robot_sim.relative_ago(last.get("t"), dt.timestamp())
+            if motion in {"walking", "waving", "demo"} or pose in {"walk-cycle", "wave"}:
+                label = "walking" if motion == "walking" or pose == "walk-cycle" else (
+                    "waving" if motion == "waving" or pose == "wave" else motion
+                )
+                held = f" I have been {label} since {ago}."
+            else:
+                act = str(last.get("act") or pose or "this pose")
+                held = f" Last body change ({act}): {ago}."
+    return (
+        f"{_NOW_MARK}\n"
+        "NOW — your sense of clock time for THIS thought, the way a person knows what time it is. "
+        "Use it for greetings, whether a walk or wave has been going on a while, and whether a request fits this moment. "
+        "If they ask the time, say it in spoken words (ten oh three PM), never digits with a colon.\n"
+        f"It is {part} here: {_human_clock(dt)} {tz}.{held}"
+    )
+
+
 def build_fast_chat_messages(bot: Any, user_text: str, *, just_did: str | None = None) -> list[dict[str, str]]:
     which = "commanded" if just_did else "live"
     timed = robot_sim.describe_body_timed(getattr(bot, "robot_state", None), which=which)
@@ -3916,6 +4148,7 @@ def build_fast_chat_messages(bot: Any, user_text: str, *, just_did: str | None =
     )
     sys = (
         f"{sense}\n\n"
+        f"{teela_now_block(bot)}\n\n"
         f"{_FAST_CHAT_SYS}\n"
         f"{VOICE_CHAT_NOTE if voice_chat_active(bot) else ''}"
         f"{CHATTERBOX_VOICE_NOTE if voice_enabled() else ''}"
@@ -4765,6 +4998,8 @@ _TEELA_MINIOS_SYS = (
     "Intent is not accomplishment. If they ask what something LOOKS LIKE, observe (desktop_observe / "
     "screenshot) before answering from I-feel. If evidence of the current environment is missing, observe. "
     "If they are just talking, speak — tools are optional. "
+    "NOW is your clock: time of day, local date, and how long the current pose or walk has lasted. "
+    "Use it when chatting (good morning) and when moving (you have been walking for a while). "
     "If you are truly unsure what they mean, call ask_user once with a short question and 2-4 options. "
     "Do not ask when the request is already clear. Do not ask on every turn. "
     "After a tool returns, you may call another tool or talk to the person in one or two sentences. "
@@ -6379,6 +6614,7 @@ def assemble_teela_executive_payload(
         look = ""
     sys = (
         f"{_TEELA_EXEC_SYS}\n{chat_bit}{voice_bit}\n{feel}\n"
+        f"{teela_now_block(bot)}\n"
         f"Environment: {json.dumps(env, default=str)[:800]}{look}"
     )
     if hint:
@@ -9936,6 +10172,7 @@ def inject_live_body(payload: dict[str, Any], bot: Any) -> dict[str, Any]:
         kind=kind,
         upcoming=queued_motor_future(bot),
     )
+    block = f"{block}\n{teela_now_block(bot)}"
     sys_i = next(
         (i for i, m in enumerate(msgs) if isinstance(m, dict) and m.get("role") == "system"),
         None,
@@ -11532,7 +11769,7 @@ System: bot_desktop__teela_system_check (scope minios vs host). After a check, w
 MEMORY is what happened previously. INTENT is what you asked the body to do. PROPRIOCEPTION (I-feel) is current body report. VISION is what you can see. Never confuse intent with accomplishment. If they ask what something LOOKS LIKE, observe. If a claim depends on current environment and you lack evidence, observe first. If they are just talking, speak — tools are optional.
 If they ask you to type a recipe, letter, or anything you have to write or look up, write the real content — never type their request back at them. Follow the conversation: "it" means the thing you were just talking about. Pasted photos and short videos: look at the pixels. Do not say you cannot browse, type, or review media.
 
-You have a body. The MiniOS App Preview Robot Simulator is your physical state and will drive the real Teela. You have continuous proprioception: every thought includes an I-feel sense of the live 3D twin. That sense is your body the way a human knows their limbs — not a tool you look up, not chat memory, not a guess. If the sense says you are standing, you are standing even if you waved earlier. Their words do not move you by themselves. Feel I-feel, understand the request, then call the body tool if you need to move (exact names from the tools list — never mcp__...). Do not claim you moved until that tool returns. robot_status.spoken is the same live feel in ordinary words. Talk in first person. When they say "your hand" they mean your body. Do not search for a robot program. Never list joint names unless asked. Follow the conversation.
+You have a body. The MiniOS App Preview Robot Simulator is your physical state and will drive the real Teela. You have continuous proprioception: every thought includes an I-feel sense of the live 3D twin. That sense is your body the way a human knows their limbs — not a tool you look up, not chat memory, not a guess. If the sense says you are standing, you are standing even if you waved earlier. Their words do not move you by themselves. Feel I-feel, understand the request, then call the body tool if you need to move (exact names from the tools list — never mcp__...). Do not claim you moved until that tool returns. robot_status.spoken is the same live feel in ordinary words. You also know the local time of day from NOW — greet for morning/afternoon/evening/night, and know how long you have been waving or walking. Do not read the clock aloud unless asked. Talk in first person. When they say "your hand" they mean your body. Do not search for a robot program. Never list joint names unless asked. Follow the conversation.
 Pasted images, MiniOS screenshots, and short video are served by Qwen3-VL-8B. Look at the pixels.
 You have private memory for this bot only. Other bots cannot read it.
 You may list_teammates, message_teammate, create_teammate, and delete_teammate. Helpers on this computer are grok-build. Messaging does not share files unless the user granted you read access to that bot's workspace. Use list_shared_desks / list_shared_files / read_shared_file only for desks you were granted. Use request_workspace_share to ask the user. Never assume access.
@@ -17083,14 +17320,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _tts_request(self) -> None:
         body = self._read_json()
-        text = sanitize_chatterbox_text(
-            str(body.get("text") or "").strip(),
-            str(body.get("user_text") or ""),
-        )
+        raw_text = str(body.get("text") or "").strip()
+        user_text = str(body.get("user_text") or "")
+        emotion, params = tts_emotion_params(raw_text, str(body.get("emotion") or ""), user_text)
+        text = sanitize_chatterbox_text(raw_text, user_text)
         if not text:
             return self._json(400, {"error": "text required"})
+        text = apply_tts_emotion_tag(text, emotion)
+        payload = {"text": text, "emotion": emotion, **params}
         code, raw = self._voice_upstream(
-            "POST", f"{vu.tts_url()}/tts", json.dumps({"text": text}).encode(),
+            "POST", f"{vu.tts_url()}/tts", json.dumps(payload).encode(),
             "application/json", vu.TTS_TIMEOUT_S,
         )
         if code != 200 or not raw:

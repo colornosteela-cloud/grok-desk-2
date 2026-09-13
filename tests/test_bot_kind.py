@@ -749,6 +749,9 @@ class BotKindTests(unittest.TestCase):
         self.assertIn("twenty-seven billion", d._TEELA_MINIOS_SYS.lower())
         self.assertIn("not 3b", d._TEELA_MINIOS_SYS.lower().replace("3.8b", "x"))
         self.assertIn("not 3B", d._TEELA_MINIOS_SYS)
+        self.assertEqual(d.spoken_clock(10, 3, "PM"), "ten oh three PM")
+        self.assertEqual(d.tts_friendly_times("It's 10:03 PM."), "It's ten oh three PM.")
+        self.assertEqual(d.sanitize_chatterbox_text("The time is 10:03 PM."), "The time is ten oh three PM.")
         self.assertEqual(d.sanitize_chatterbox_text("[happy] Hi [laughs] there [nope]"), "[happy] Hi there")
         self.assertEqual(
             d.sanitize_chatterbox_text("[laugh] That's a good one", "tell me a joke"),

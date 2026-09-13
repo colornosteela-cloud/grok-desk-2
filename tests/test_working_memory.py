@@ -465,6 +465,10 @@ class WorkingMemoryUiTests(unittest.TestCase):
         self.assertNotIn("type=\"module\"", index)
         self.assertIn('<script src="/working-memory.js', index)
         self.assertIn("WorkingMemory.syncFromBot", app)
+        self.assertIn("WorkingMemory.onSelectBot", app)
+        self.assertIn("function onSelectBot", js)
+        self.assertIn("boundBotId", js)
+        self.assertIn("fetchGen", js)
         self.assertNotIn("from './working-memory", app)
         self.assertNotIn("from \"./working-memory", js)
 

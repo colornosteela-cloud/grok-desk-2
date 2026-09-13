@@ -45,6 +45,8 @@
     memOffset: 0,
     selectedMemory: null,
     lastFetch: 0,
+    boundBotId: "",
+    fetchGen: 0,
   };
 
   function pressureFromUtilization(u) {
@@ -102,6 +104,12 @@
     return (typeof state !== "undefined" && state.selected) || "";
   }
 
+  function botRecord() {
+    const id = botId();
+    const bots = (typeof state !== "undefined" && state.bots) || [];
+    return bots.find((x) => x.id === id) || null;
+  }
+
   function pathFor(rest) {
     const id = botId();
     const tail = rest ? `/${rest.replace(/^\//, "")}` : "";
@@ -109,9 +117,41 @@
   }
 
   async function get(rest, query) {
-    if (!botId() || typeof api !== "function") return null;
+    const id = botId();
+    if (!id || typeof api !== "function") return null;
+    const gen = ui.fetchGen;
     const q = query ? `?${query}` : "";
-    return api(pathFor(rest) + q);
+    const data = await api(pathFor(rest) + q);
+    if (ui.fetchGen !== gen || botId() !== id) return null;
+    return data;
+  }
+
+  function resetBoundData(id) {
+    ui.summary = null;
+    ui.items = null;
+    ui.memories = null;
+    ui.retrieval = null;
+    ui.history = null;
+    ui.search = null;
+    ui.selectedMemory = null;
+    ui.boundBotId = id || botId();
+  }
+
+  function onSelectBot(bot) {
+    const id = (bot && bot.id) || botId();
+    if (ui.boundBotId && ui.boundBotId !== id) {
+      ui.fetchGen += 1;
+      resetBoundData(id);
+      paintHead();
+      if (ui.open) {
+        const el = $("wm-body");
+        if (el) el.innerHTML = `<p class="wm-empty">Loading ${escapeHtml((bot && bot.name) || "this bot")}…</p>`;
+      }
+    } else if (!ui.boundBotId) {
+      ui.boundBotId = id;
+    }
+    setIndicator(bot);
+    if (ui.open) refreshAll();
   }
 
   function setIndicator(bot) {
@@ -171,10 +211,16 @@
   }
 
   async function refreshSummary(render) {
+    const id = botId();
+    const gen = ui.fetchGen;
     ui.lastFetch = Date.now();
     try {
-      ui.summary = await get("");
+      const data = await get("");
+      if (botId() !== id || ui.fetchGen !== gen) return;
+      if (data == null) return;
+      ui.summary = data;
     } catch {
+      if (botId() !== id || ui.fetchGen !== gen) return;
       ui.summary = { used_status: "unavailable", pressure_status: "unavailable" };
     }
     paintHead();
@@ -195,34 +241,63 @@
   }
 
   async function loadTab(name) {
+    const id = botId();
+    const gen = ui.fetchGen;
     try {
-      if (name === "inspect" || name === "active") ui.items = await get("items", "limit=100");
+      if (name === "inspect" || name === "active") {
+        const data = await get("items", "limit=100");
+        if (botId() !== id || ui.fetchGen !== gen) return;
+        if (data != null) ui.items = data;
+      }
       if (name === "memory") {
         const filter = ui.memFilter;
         const qs = [`limit=50`, `offset=${ui.memOffset}`];
         if (filter === "corrections") qs.push("filter=corrections");
         else if (filter) qs.push(`type=${encodeURIComponent(filter)}`);
-        ui.memories = await get("memories", qs.join("&"));
+        const data = await get("memories", qs.join("&"));
+        if (botId() !== id || ui.fetchGen !== gen) return;
+        if (data != null) ui.memories = data;
       }
-      if (name === "retrieval") ui.retrieval = await get("retrieval");
-      if (name === "history") ui.history = await get("history");
+      if (name === "retrieval") {
+        const data = await get("retrieval");
+        if (botId() !== id || ui.fetchGen !== gen) return;
+        if (data != null) ui.retrieval = data;
+      }
+      if (name === "history") {
+        const data = await get("history");
+        if (botId() !== id || ui.fetchGen !== gen) return;
+        if (data != null) ui.history = data;
+      }
     } catch (err) {
+      if (botId() !== id || ui.fetchGen !== gen) return;
       ui.error = String(err && err.message ? err.message : err);
     }
+    if (botId() !== id || ui.fetchGen !== gen) return;
     renderBody();
   }
 
   function paintHead() {
+    const bot = botRecord();
+    const title = $("wm-title");
+    if (title) title.textContent = bot && bot.name ? `${bot.name} — Working Memory` : "Working Memory";
+    const kicker = document.querySelector(".wm-kicker");
+    if (kicker) {
+      const kind = bot && bot.kind === "grok-build" ? "BUILD" : "TEELA";
+      kicker.textContent = `🧠 ${kind} — WORKING MEMORY`;
+    }
     const meta = $("wm-head-meta");
     if (!meta) return;
     const s = ui.summary || {};
     if (s.used_tokens == null || s.capacity_tokens == null) {
-      meta.textContent = "Context accounting: Unavailable";
+      meta.textContent = bot && bot.name
+        ? `${bot.name} · Context accounting: Unavailable`
+        : "Context accounting: Unavailable";
       return;
     }
     const pct = s.capacity_percent != null ? Number(s.capacity_percent).toFixed(1) : "—";
     const age = s.last_updated ? ` · updated ${relTime(s.last_updated)}` : "";
-    meta.textContent = `${fmtInt(s.used_tokens)} / ${fmtInt(s.capacity_tokens)} · ${pct}% · ${s.pressure || "—"}`;
+    const who = bot && bot.name ? `${bot.name} · ` : "";
+    meta.textContent = `${who}${fmtInt(s.used_tokens)} / ${fmtInt(s.capacity_tokens)} · ${pct}% · ${s.pressure || "—"}`;
     meta.appendChild(document.createTextNode(age));
   }
 
@@ -747,6 +822,7 @@
     formatCompact,
     fmtK,
     syncFromBot,
+    onSelectBot,
     onUsage,
     open: openDrawer,
     close: closeDrawer,

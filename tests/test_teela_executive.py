@@ -7,7 +7,9 @@ import json
 import re
 import sys
 import tempfile
+import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -117,6 +119,11 @@ class TeelaExecutiveTests(unittest.TestCase):
         self.assertTrue(not hint or "body" in hint.lower())
         sys_text = str((wave_payload.get("messages") or [{}])[0].get("content") or "")
         self.assertIn("I feel", sys_text)
+        self.assertIn("[[teela-now]]", sys_text)
+        self.assertRegex(sys_text, r"It is (morning|afternoon|evening|night) here:")
+        now = datetime.now().astimezone()
+        self.assertIn(now.strftime("%A"), sys_text)
+        self.assertIn(str(now.year), sys_text)
         self.assertIn("web_search", names)
         self.assertIn("web_search", d._TEELA_MINIOS_SYS)
         hint = d.teela_capability_hint("try to do the moonwalk")
@@ -939,6 +946,27 @@ class TeelaExecutiveTests(unittest.TestCase):
         self.assertIsNotNone(fb)
         self.assertTrue(fb.handled)
         self.assertNotIn("practiced the outcome", (line or "").lower())
+
+    def test_now_block_has_time_of_day_and_hold_duration(self) -> None:
+        morning = datetime(2026, 9, 12, 7, 5)
+        text = d.teela_now_block(None, when=morning)
+        self.assertIn("[[teela-now]]", text)
+        self.assertIn("morning", text)
+        self.assertIn("Saturday", text)
+        self.assertIn("September 12, 2026", text)
+        self.assertIn("seven oh five AM", text)
+        self.assertNotIn("7:05", text)
+        night = datetime(2026, 9, 12, 23, 10)
+        self.assertIn("night", d.teela_now_block(None, when=night))
+        bot = _ExecBot()
+        bot.robot_state["motion"] = "walking"
+        bot.robot_state["pose"] = "walk-cycle"
+        bot.robot_state["history"] = [
+            {"t": time.time() - 125, "act": "walk", "pose": "walk-cycle", "motion": "walking"}
+        ]
+        held = d.teela_now_block(bot)
+        self.assertIn("walking", held)
+        self.assertRegex(held, r"2 minutes ago|minute")
 
     def test_stop_waving_and_walk_left_is_plan_not_in_place(self) -> None:
         bot = _ExecBot()

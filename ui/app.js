@@ -1577,38 +1577,25 @@ function renderRoster() {
   const hint = $("peer-hint");
   if (hint) {
     const peers = state.peers || [];
-    if (!peers.length) {
+    const auth = peers.filter((p) => p.status === "auth");
+    const inbound = peers.filter((p) => p.inbound_seen && p.status !== "ok" && p.status !== "auth");
+    hint.classList.toggle("is-offline", !!(auth.length || inbound.length));
+    if (auth.length) {
+      const who = auth.map((p) => p.name).join(", ");
+      hint.hidden = false;
+      hint.textContent =
+        `${who} rejected the cluster token (auth). This computer and ${who} do not have the same secret. Open Cluster step 2 on both: fingerprints must match. On body, paste brain’s token again and click Save token.`;
+    } else if (inbound.length) {
+      hint.hidden = false;
+      hint.textContent = inbound
+        .map(
+          (p) =>
+            `${p.name} can reach this desk, but ${p.url} is closed from here. On that computer set Grok Desk address to its LAN IP (not 127.0.0.1) and allow port 8742 in.`
+        )
+        .join(" ");
+    } else {
       hint.hidden = true;
       hint.textContent = "";
-    } else {
-      const bits = peers.map((p) => {
-        const st = p.status || "offline";
-        return st === "ok" ? p.name : `${p.name} ${st}`;
-      });
-      const remote = (state.bots || []).filter((b) => b.remote).length;
-      hint.hidden = false;
-      const bad = peers.some((p) => p.status && p.status !== "ok");
-      hint.classList.toggle("is-offline", bad);
-      const auth = peers.some((p) => p.status === "auth");
-      if (remote) {
-        hint.textContent = `Also showing ${remote} bot${remote === 1 ? "" : "s"} from ${bits.join(", ")}.`;
-      } else if (auth) {
-        const who = peers.filter((p) => p.status === "auth").map((p) => p.name).join(", ");
-        hint.textContent =
-          `${who} rejected the cluster token (auth). This computer and ${who} do not have the same secret. Open Cluster step 2 on both: fingerprints must match. On body, paste brain’s token again and click Save token.`;
-      } else {
-        const inbound = peers.filter((p) => p.inbound_seen && p.status !== "ok");
-        if (inbound.length) {
-          hint.textContent = inbound
-            .map(
-              (p) =>
-                `${p.name} can reach this desk, but ${p.url} is closed from here. On that computer set Grok Desk address to its LAN IP (not 127.0.0.1) and allow port 8742 in.`
-            )
-            .join(" ");
-        } else {
-          hint.textContent = `Peers: ${bits.join(", ")}. Other hosts’ bots appear here when that deskd is up on its LAN IP:8742.`;
-        }
-      }
     }
   }
   if (window.DeskUI) {
@@ -2428,6 +2415,7 @@ async function selectBot(id) {
   }
   renderConversation(b);
   renderChatTimeline();
+  if (window.WorkingMemory) WorkingMemory.onSelectBot(b);
   await loadWorkspace(b);
   hideAgentDesktopCursor();
   moveAgentDesktopCursor(b.desktop_cursor?.x ?? 500, b.desktop_cursor?.y ?? 500, false, false);
